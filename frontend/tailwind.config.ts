@@ -41,6 +41,7 @@ export default {
       },
       transitionDuration: {
         color: tokens.motion.duration.color,
+        enter: tokens.motion.duration.enter,
       },
       transitionTimingFunction: {
         motion: tokens.motion.easeOut,

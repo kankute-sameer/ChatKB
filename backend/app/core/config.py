@@ -21,8 +21,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://chatkb:chatkb@127.0.0.1:5433/chatkb"
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4.1-mini"
+    llm_model: str = "gpt-5.6-luna"
     llm_title_model: str = "gpt-4.1-mini"
+    llm_reasoning_effort: str = "medium"
+    llm_reasoning_summary: str = "auto"
     stream_buffer_ttl_seconds: int = 300
 
     @field_validator("auth_users", mode="before")

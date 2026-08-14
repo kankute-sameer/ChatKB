@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  Brain,
+  CheckCircle,
   Copy,
   FileText,
   Mic,
@@ -14,6 +16,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LandingHero } from "@/components/LandingHero";
+import { MarkdownBody } from "@/components/MarkdownBody";
+import { TwinOrbit } from "@/components/TwinOrbit";
 import type { ChatMessage } from "@/mocks/data";
 import { cn } from "@/lib/utils";
 
@@ -173,7 +177,12 @@ export function ChatView({
       {header ? (
         <div className="border-b border-border px-4 py-2">{header}</div>
       ) : null}
-      <ThreadBody messages={messages} emptyState={emptyState} composer={composer} />
+      <ThreadBody
+        messages={messages}
+        emptyState={emptyState}
+        composer={composer}
+        isStreaming={isStreaming}
+      />
     </div>
   );
 }
@@ -182,15 +191,29 @@ function ThreadBody({
   messages,
   emptyState,
   composer,
+  isStreaming,
 }: {
   messages: ChatMessage[];
   emptyState?: ReactNode;
   composer: ReactNode;
+  isStreaming?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
+
+  const last = messages[messages.length - 1];
+  const waitingForText =
+    Boolean(isStreaming) &&
+    (!last ||
+      last.role === "user" ||
+      (last.role === "assistant" && !last.content.trim()));
+  const hideEmptyAssistant =
+    waitingForText && last?.role === "assistant" && !last.thought;
+  const visibleMessages = hideEmptyAssistant
+    ? messages.slice(0, -1)
+    : messages;
 
   const updatePin = () => {
     const el = scrollRef.current;
@@ -214,7 +237,7 @@ function ThreadBody({
     if (pinnedRef.current) {
       bottomRef.current?.scrollIntoView({ block: "end" });
     }
-  }, [messages]);
+  }, [messages, waitingForText]);
 
   return (
     <>
@@ -225,11 +248,12 @@ function ThreadBody({
           className="h-full overflow-auto px-8 pt-6 pb-16"
         >
           <div className="mx-auto flex max-w-composer flex-col gap-6">
-            {messages.length === 0
+            {visibleMessages.length === 0
               ? emptyState
-              : messages.map((message) => (
+              : visibleMessages.map((message) => (
                   <MessageBlock key={message.id} message={message} />
                 ))}
+            {waitingForText && !last?.thought ? <TwinOrbit size={24} /> : null}
           </div>
           <div ref={bottomRef} />
         </div>
@@ -258,22 +282,207 @@ function ThreadBody({
 }
 
 function MessageBlock({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
+  if (message.role === "user") {
+    return (
+      <div className="group flex flex-col items-end gap-2">
+        <div
+          className={cn(
+            "max-w-full rounded bg-gray-100 px-4 py-2",
+            threadCopyClass,
+          )}
+        >
+          {message.content}
+        </div>
+        <div className="flex items-center gap-1 opacity-0 transition-opacity duration-color ease-out group-hover:opacity-100 group-focus-within:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Copy"
+            onClick={() => void navigator.clipboard.writeText(message.content)}
+          >
+            <Copy className="size-4 text-gray-400" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return <AssistantTurn message={message} />;
+}
+
+function splitThought(text: string): { title: string; body: string } {
+  const trimmed = text.trim();
+  const heading = trimmed.match(/^\*\*(.+?)\*\*\s*(?:\n+([\s\S]*))?$/);
+  if (heading) {
+    return { title: heading[1], body: heading[2]?.trim() ?? "" };
+  }
+  const [first, ...rest] = trimmed.split(/\n+/);
+  const title = first.replace(/^\*\*|\*\*$/g, "").trim() || "Thought";
+  if (rest.length) {
+    return { title, body: rest.join("\n\n").trim() };
+  }
+  if (title.length <= 80) {
+    return { title, body: "" };
+  }
+  return { title: "Thought", body: trimmed };
+}
+
+function Collapse({
+  open,
+  children,
+}: {
+  open: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "grid transition-[grid-template-rows] duration-enter ease-motion motion-reduce:transition-none",
+        open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+      )}
+    >
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+function AssistantTurn({ message }: { message: ChatMessage }) {
+  const streaming = Boolean(message.thoughtStreaming);
+  const hasThought = Boolean(message.thought?.trim());
+  const hasContent = Boolean(message.content.trim());
+  const { title, body } = splitThought(message.thought ?? "");
+
+  const [thoughtOpen, setThoughtOpen] = useState(true);
+  const [detailOpen, setDetailOpen] = useState(true);
+  const startedAt = useRef<number | null>(null);
+  const [seconds, setSeconds] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (streaming) {
+      startedAt.current ??= Date.now();
+      setThoughtOpen(true);
+      setDetailOpen(true);
+      return;
+    }
+    if (startedAt.current != null) {
+      setSeconds(Math.max(1, Math.round((Date.now() - startedAt.current) / 1000)));
+      setDetailOpen(false);
+    }
+  }, [streaming]);
+
+  const thoughtLabel =
+    seconds != null ? `Thought for ${seconds}s` : "Thought";
 
   return (
-    <div className={cn("group flex flex-col gap-2", isUser && "items-end")}>
-      {message.thought ? (
-        <p className="text-xs text-muted-foreground">{message.thought}</p>
+    <div className="group flex max-w-full flex-col gap-2 bg-background">
+      {streaming ? (
+        <div className="flex items-center gap-3">
+          <TwinOrbit size={24} />
+          <p className={threadCopyClass}>Thinking</p>
+        </div>
+      ) : hasThought ? (
+        <button
+          type="button"
+          className="flex items-center gap-2 text-left"
+          onClick={() => setThoughtOpen((open) => !open)}
+          aria-expanded={thoughtOpen}
+        >
+          <p className={cn(threadCopyClass, "text-ink-placeholder")}>
+            {thoughtLabel}
+          </p>
+        </button>
       ) : null}
-      <div
-        className={cn(
-          "max-w-full",
-          threadCopyClass,
-          isUser && "rounded bg-gray-100 px-4 py-2",
-        )}
-      >
-        {message.content}
-      </div>
+
+      {hasThought ? (
+        <Collapse open={thoughtOpen || streaming}>
+          <div className="flex items-stretch gap-3 pt-2">
+            <div className="flex w-4 shrink-0 flex-col items-center">
+              <button
+                type="button"
+                className="relative z-10 shrink-0 bg-background text-ink-placeholder focus-visible:outline-none"
+                aria-label="Toggle thought"
+                onClick={() => setDetailOpen((open) => !open)}
+              >
+                <Brain className="size-4" strokeWidth={1.5} />
+              </button>
+              <div
+                aria-hidden
+                className="my-2 w-px min-h-6 flex-1 bg-gray-400"
+              />
+              {!streaming ? (
+                <CheckCircle
+                  className="relative z-10 size-4 shrink-0 bg-background text-ink-placeholder"
+                  strokeWidth={1.5}
+                />
+              ) : null}
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <button
+                type="button"
+                className="flex min-w-0 items-start gap-2 text-left focus-visible:outline-none"
+                onClick={() => setDetailOpen((open) => !open)}
+                aria-expanded={detailOpen}
+              >
+                <p
+                  className={cn(
+                    threadCopyClass,
+                    "min-w-0 flex-1 font-medium text-ink-placeholder",
+                  )}
+                >
+                  {title}
+                </p>
+              </button>
+              <Collapse open={detailOpen}>
+                <div className="mt-2">
+                  <MarkdownBody
+                    text={streaming ? (message.thought ?? "") : body}
+                    className={cn(
+                      threadCopyClass,
+                      "bg-background text-ink-placeholder",
+                    )}
+                  />
+                </div>
+              </Collapse>
+              {!streaming ? (
+                <p
+                  className={cn(
+                    threadCopyClass,
+                    "mt-auto pt-6 text-ink-placeholder",
+                  )}
+                >
+                  Done
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </Collapse>
+      ) : null}
+
+      {hasContent ? (
+        <div className={cn("min-w-0", threadCopyClass)}>
+          <MarkdownBody text={message.content} />
+        </div>
+      ) : null}
+
+      {hasContent ? (
+        <div className="flex items-center gap-1 opacity-0 transition-opacity duration-color ease-out group-hover:opacity-100 group-focus-within:opacity-100">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Copy"
+            onClick={() => void navigator.clipboard.writeText(message.content)}
+          >
+            <Copy className="size-4 text-gray-400" />
+          </Button>
+          <Button variant="ghost" size="icon" aria-label="Good response">
+            <ThumbsUp className="size-4 text-gray-400" />
+          </Button>
+          <Button variant="ghost" size="icon" aria-label="Bad response">
+            <ThumbsDown className="size-4 text-gray-400" />
+          </Button>
+        </div>
+      ) : null}
+
       {message.citations?.length ? (
         <div className="flex flex-wrap gap-2">
           {message.citations.map((citation) => (
@@ -284,26 +493,6 @@ function MessageBlock({ message }: { message: ChatMessage }) {
           ))}
         </div>
       ) : null}
-      <div className="flex items-center gap-1 opacity-0 transition-opacity duration-color ease-out group-hover:opacity-100 group-focus-within:opacity-100">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Copy"
-          onClick={() => void navigator.clipboard.writeText(message.content)}
-        >
-          <Copy className="size-4 text-gray-400" />
-        </Button>
-        {isUser ? null : (
-          <>
-            <Button variant="ghost" size="icon" aria-label="Good response">
-              <ThumbsUp className="size-4 text-gray-400" />
-            </Button>
-            <Button variant="ghost" size="icon" aria-label="Bad response">
-              <ThumbsDown className="size-4 text-gray-400" />
-            </Button>
-          </>
-        )}
-      </div>
     </div>
   );
 }

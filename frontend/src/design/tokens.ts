@@ -7,6 +7,7 @@
 export const tokens = {
   spacing: {
     0: "0px",
+    px: "1px",
     1: "4px",
     2: "8px",
     3: "12px",
@@ -58,6 +59,7 @@ export const tokens = {
       foreground: "#FFFFFF",
       muted: "#EFF4FF",
     },
+    orbit: "#8B8B8B",
     status: {
       success: "#15803D",
       "success-foreground": "#15803D",
@@ -148,10 +150,13 @@ export const tokens = {
   },
   motion: {
     easeOut: "cubic-bezier(0.16, 1, 0.3, 1)",
+    orbit: "cubic-bezier(0.5, 0, 0.5, 1)",
     duration: {
       color: "150ms",
       enter: "500ms",
       card: "200ms",
+      orbit: "1.4s",
+      orbitReduced: "3s",
     },
     enterY: "8px",
     staggerMs: 40,

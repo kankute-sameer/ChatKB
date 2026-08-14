@@ -52,3 +52,10 @@ export function textFromParts(parts: UIMessagePart[]): string {
     .map((part) => part.text ?? "")
     .join("");
 }
+
+export function reasoningFromParts(parts: UIMessagePart[]): string {
+  return parts
+    .filter((part) => part.type === "reasoning")
+    .map((part) => part.text ?? "")
+    .join("");
+}

@@ -29,4 +29,41 @@
   .animate-enter-stagger {
     animation: none !important;
   }
+
+  .twin-orbit {
+    animation-duration: 3s;
+    animation-timing-function: linear;
+  }
+}
+
+.twin-orbit {
+  position: relative;
+  width: var(--size);
+  height: var(--size);
+  animation: twin-orbit-spin var(--speed) var(--ease) infinite;
+}
+
+.twin-orbit span {
+  position: absolute;
+  left: 50%;
+  width: calc(var(--size) * 0.18);
+  height: calc(var(--size) * 0.18);
+  margin-left: calc(var(--size) * -0.09);
+  border-radius: 50%;
+}
+
+.twin-orbit span:nth-child(1) {
+  top: calc(var(--size) * 0.045);
+  background: var(--dot-a);
+}
+
+.twin-orbit span:nth-child(2) {
+  bottom: calc(var(--size) * 0.045);
+  background: var(--dot-b);
+}
+
+@keyframes twin-orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

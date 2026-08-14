@@ -40,27 +40,22 @@ class PartsAccumulator:
     def __init__(self) -> None:
         self.parts: list[dict[str, Any]] = []
         self._text_index: dict[str, int] = {}
+        self._reasoning_index: dict[str, int] = {}
 
     def apply(self, event: StreamEvent) -> None:
         event_type = event.get("type")
         if event_type == "text-start":
-            text_id = str(event.get("id", ""))
-            self._text_index[text_id] = len(self.parts)
-            self.parts.append({"type": "text", "text": "", "state": "streaming"})
+            self._start_part(self._text_index, event, "text")
         elif event_type == "text-delta":
-            text_id = str(event.get("id", ""))
-            index = self._text_index.get(text_id)
-            if index is None:
-                index = len(self.parts)
-                self._text_index[text_id] = index
-                self.parts.append({"type": "text", "text": "", "state": "streaming"})
-            delta = event.get("delta") or ""
-            self.parts[index]["text"] = str(self.parts[index].get("text") or "") + delta
+            self._delta_part(self._text_index, event, "text")
         elif event_type == "text-end":
-            text_id = str(event.get("id", ""))
-            index = self._text_index.get(text_id)
-            if index is not None:
-                self.parts[index]["state"] = "done"
+            self._end_part(self._text_index, event)
+        elif event_type == "reasoning-start":
+            self._start_part(self._reasoning_index, event, "reasoning")
+        elif event_type == "reasoning-delta":
+            self._delta_part(self._reasoning_index, event, "reasoning")
+        elif event_type == "reasoning-end":
+            self._end_part(self._reasoning_index, event)
         elif event_type == "tool-input-start":
             tool_name = str(event.get("toolName") or "tool")
             self.parts.append(
@@ -79,11 +74,36 @@ class PartsAccumulator:
                     part["input"] = event.get("input") or {}
                     part["state"] = "input-available"
 
+    def _start_part(
+        self, index_map: dict[str, int], event: StreamEvent, part_type: str
+    ) -> None:
+        part_id = str(event.get("id", ""))
+        index_map[part_id] = len(self.parts)
+        self.parts.append({"type": part_type, "text": "", "state": "streaming"})
+
+    def _delta_part(
+        self, index_map: dict[str, int], event: StreamEvent, part_type: str
+    ) -> None:
+        part_id = str(event.get("id", ""))
+        index = index_map.get(part_id)
+        if index is None:
+            index = len(self.parts)
+            index_map[part_id] = index
+            self.parts.append({"type": part_type, "text": "", "state": "streaming"})
+        delta = event.get("delta") or ""
+        self.parts[index]["text"] = str(self.parts[index].get("text") or "") + delta
+
+    def _end_part(self, index_map: dict[str, int], event: StreamEvent) -> None:
+        part_id = str(event.get("id", ""))
+        index = index_map.get(part_id)
+        if index is not None:
+            self.parts[index]["state"] = "done"
+
     def finalize(self) -> list[dict[str, Any]]:
         finalized: list[dict[str, Any]] = []
         for part in self.parts:
             item = dict(part)
-            if item.get("type") == "text":
+            if item.get("type") in ("text", "reasoning"):
                 item["state"] = "done"
             finalized.append(item)
         return finalized
@@ -116,17 +136,38 @@ def format_sse(event_id: int, payload: dict[str, Any]) -> str:
 
 
 def replay_events_from_message(message: Message) -> list[dict[str, Any]]:
-    text_id = new_id("text")
-    text = text_from_parts(message.parts)
-    return [
+    events: list[dict[str, Any]] = [
         {"type": "start", "messageId": message.id},
         {"type": "start-step"},
-        {"type": "text-start", "id": text_id},
-        {"type": "text-delta", "id": text_id, "delta": text},
-        {"type": "text-end", "id": text_id},
-        {"type": "finish-step"},
-        {"type": "finish"},
     ]
+    for part in message.parts:
+        part_type = part.get("type")
+        text = str(part.get("text") or "")
+        if part_type == "reasoning":
+            part_id = new_id("rsn")
+            events.extend(
+                [
+                    {"type": "reasoning-start", "id": part_id},
+                    {"type": "reasoning-delta", "id": part_id, "delta": text},
+                    {"type": "reasoning-end", "id": part_id},
+                ]
+            )
+        elif part_type == "text":
+            part_id = new_id("text")
+            events.extend(
+                [
+                    {"type": "text-start", "id": part_id},
+                    {"type": "text-delta", "id": part_id, "delta": text},
+                    {"type": "text-end", "id": part_id},
+                ]
+            )
+    events.extend(
+        [
+            {"type": "finish-step"},
+            {"type": "finish"},
+        ]
+    )
+    return events
 
 
 async def sse_from_buffer(

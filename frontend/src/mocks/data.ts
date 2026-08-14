@@ -50,6 +50,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   thought?: string;
+  thoughtStreaming?: boolean;
   citations?: Citation[];
 }
 

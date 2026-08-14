@@ -8,6 +8,7 @@ import type { ChatMessage } from "@/mocks/data";
 import {
   getConversation,
   notifyConversationsChanged,
+  reasoningFromParts,
   stoppedStorageKey,
   textFromParts,
   type ConversationDetail,
@@ -143,12 +144,24 @@ function ConversationChat({
 
   const isStreaming = status === "streaming" || status === "submitted";
 
-  const displayMessages: ChatMessage[] = messages.map((message) => ({
-    id: message.id,
-    threadId: conversation.id,
-    role: message.role === "user" ? "user" : "assistant",
-    content: textFromUIMessage(message),
-  }));
+  const displayMessages: ChatMessage[] = messages.map((message, index) => {
+    const content = textFromUIMessage(message);
+    const thought = reasoningFromUIMessage(message);
+    const isLast = index === messages.length - 1;
+    return {
+      id: message.id,
+      threadId: conversation.id,
+      role: message.role === "user" ? "user" : "assistant",
+      content,
+      thought: thought || undefined,
+      thoughtStreaming:
+        isStreaming &&
+        isLast &&
+        message.role !== "user" &&
+        Boolean(thought) &&
+        !content.trim(),
+    };
+  });
 
   const onStop = () => {
     sessionStorage.setItem(stoppedStorageKey(conversation.id), "1");
@@ -193,11 +206,21 @@ function toUIMessages(messages: ConversationMessage[]): UIMessage[] {
   return messages.map((message) => ({
     id: message.id,
     role: message.role,
-    parts: message.parts.map((part) =>
-      part.type === "text"
-        ? { type: "text" as const, text: part.text ?? "" }
-        : { type: "text" as const, text: "" },
-    ),
+    parts: message.parts.flatMap((part) => {
+      if (part.type === "text") {
+        return [{ type: "text" as const, text: part.text ?? "" }];
+      }
+      if (part.type === "reasoning") {
+        return [
+          {
+            type: "reasoning" as const,
+            text: part.text ?? "",
+            state: part.state === "streaming" ? ("streaming" as const) : ("done" as const),
+          },
+        ];
+      }
+      return [];
+    }),
   }));
 }
 
@@ -206,6 +229,16 @@ function textFromUIMessage(message: UIMessage): string {
     message.parts.map((part) =>
       part.type === "text"
         ? { type: "text", text: part.text }
+        : { type: part.type },
+    ),
+  );
+}
+
+function reasoningFromUIMessage(message: UIMessage): string {
+  return reasoningFromParts(
+    message.parts.map((part) =>
+      part.type === "reasoning"
+        ? { type: "reasoning", text: part.text }
         : { type: part.type },
     ),
   );
