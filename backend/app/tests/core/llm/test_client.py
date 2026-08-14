@@ -89,3 +89,34 @@ def test_mapper_streams_reasoning_then_text() -> None:
         if event["type"] == "reasoning-delta"
     )
     assert reasoning == "Consider the question."
+
+
+def test_mapper_keeps_function_name_when_done_event_omits_it() -> None:
+    mapper = _ResponsesMapper()
+    events = [
+        *mapper.handle(
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "id": "fc_1",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "web_search",
+                    "arguments": "",
+                },
+            }
+        ),
+        *mapper.handle(
+            {
+                "type": "response.function_call_arguments.done",
+                "item_id": "fc_1",
+                "call_id": "call_1",
+                "arguments": '{"query":"latest news"}',
+            }
+        ),
+    ]
+    available = [event for event in events if event["type"] == "tool-input-available"]
+    assert len(available) == 1
+    assert available[0]["toolName"] == "web_search"
+    assert available[0]["toolCallId"] == "call_1"
+    assert available[0]["input"] == {"query": "latest news"}

@@ -1,12 +1,17 @@
 from collections.abc import AsyncIterator, Sequence
-from typing import Any, Literal, Protocol, TypedDict
-
-ChatRole = Literal["system", "user", "assistant"]
+from typing import Any, Protocol, TypedDict
 
 
-class ChatMessage(TypedDict):
-    role: ChatRole
-    content: str
+class ChatMessage(TypedDict, total=False):
+    """A Responses API input item (message, function_call, or function_call_output)."""
+
+    role: str
+    content: str | None
+    type: str
+    call_id: str
+    name: str
+    arguments: str
+    output: str
 
 
 class StreamEvent(TypedDict, total=False):
@@ -17,8 +22,15 @@ class StreamEvent(TypedDict, total=False):
     errorText: str
     toolCallId: str
     toolName: str
+    providerExecuted: bool
     inputTextDelta: str
     input: dict[str, Any]
+    output: Any
+    sourceId: str
+    url: str
+    title: str
+    snippet: str
+    publishedDate: str | None
 
 
 class LLM(Protocol):
@@ -27,6 +39,7 @@ class LLM(Protocol):
         messages: Sequence[ChatMessage],
         *,
         model: str | None = None,
+        tools: Sequence[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]: ...
 
     async def complete(

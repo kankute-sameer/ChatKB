@@ -1,4 +1,5 @@
 import type { AvatarColor } from "@/design/tokens";
+import type { ActivitySegment } from "@/lib/activity";
 
 export interface Agent {
   id: string;
@@ -44,14 +45,25 @@ export interface Citation {
   label: string;
 }
 
+export interface SourceUrl {
+  sourceId: string;
+  url: string;
+  title?: string;
+  snippet?: string;
+  publishedDate?: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   threadId: string;
   role: "user" | "assistant";
   content: string;
   thought?: string;
-  thoughtStreaming?: boolean;
+  parts?: Array<{ type: string; [key: string]: unknown }>;
+  segments?: ActivitySegment[];
+  streaming?: boolean;
   citations?: Citation[];
+  sources?: SourceUrl[];
 }
 
 export const agents: Agent[] = [

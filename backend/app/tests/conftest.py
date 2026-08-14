@@ -23,6 +23,8 @@ def client(
     monkeypatch.setenv("AUTH_USERS", json.dumps({TEST_USERNAME: hashed}))
     monkeypatch.setenv("CORS_ORIGINS", json.dumps(["http://localhost:5173"]))
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}")
+    monkeypatch.setenv("EXA_API_KEY", "test-exa-key")
+    monkeypatch.setenv("LOG_LEVEL", "WARNING")
     get_settings.cache_clear()
     app = create_app()
     with TestClient(app) as test_client:

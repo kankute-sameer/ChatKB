@@ -24,6 +24,8 @@ def _auth_env(monkeypatch: pytest.MonkeyPatch, db_path: Path) -> None:
     monkeypatch.setenv("AUTH_USERS", json.dumps({TEST_USERNAME: hashed}))
     monkeypatch.setenv("CORS_ORIGINS", json.dumps(["http://localhost:5173"]))
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    monkeypatch.setenv("EXA_API_KEY", "test-exa-key")
+    monkeypatch.setenv("LOG_LEVEL", "WARNING")
     get_settings.cache_clear()
 
 
@@ -83,6 +85,7 @@ async def _start_generation(
             app.state.stream_store,
             app.state.llm,
             app.state.session_factory,
+            app.state.tools,
         )
         await service.start_response(
             TEST_USERNAME,

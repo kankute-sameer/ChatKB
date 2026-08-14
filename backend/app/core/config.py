@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     llm_reasoning_effort: str = "medium"
     llm_reasoning_summary: str = "auto"
     stream_buffer_ttl_seconds: int = 300
+    exa_api_key: str
+    log_level: str = "DEBUG"
 
     @field_validator("auth_users", mode="before")
     @classmethod

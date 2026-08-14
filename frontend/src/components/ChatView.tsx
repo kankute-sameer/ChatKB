@@ -1,10 +1,8 @@
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
-  Brain,
-  CheckCircle,
   Copy,
   FileText,
   Mic,
@@ -13,11 +11,17 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LandingHero } from "@/components/LandingHero";
 import { MarkdownBody } from "@/components/MarkdownBody";
 import { TwinOrbit } from "@/components/TwinOrbit";
+import {
+  hasActivity,
+  messageSegments,
+  segmentSummary,
+} from "@/lib/activity";
 import type { ChatMessage } from "@/mocks/data";
 import { cn } from "@/lib/utils";
 
@@ -204,13 +208,15 @@ function ThreadBody({
   const [showJump, setShowJump] = useState(false);
 
   const last = messages[messages.length - 1];
+  const lastSegments = last ? messageSegments(last) : [];
+  const lastHasActivity = last?.role === "assistant" && hasActivity(lastSegments);
   const waitingForText =
     Boolean(isStreaming) &&
     (!last ||
       last.role === "user" ||
       (last.role === "assistant" && !last.content.trim()));
   const hideEmptyAssistant =
-    waitingForText && last?.role === "assistant" && !last.thought;
+    waitingForText && last?.role === "assistant" && !lastHasActivity;
   const visibleMessages = hideEmptyAssistant
     ? messages.slice(0, -1)
     : messages;
@@ -253,7 +259,7 @@ function ThreadBody({
               : visibleMessages.map((message) => (
                   <MessageBlock key={message.id} message={message} />
                 ))}
-            {waitingForText && !last?.thought ? <TwinOrbit size={24} /> : null}
+            {waitingForText && !lastHasActivity ? <TwinOrbit size={24} /> : null}
           </div>
           <div ref={bottomRef} />
         </div>
@@ -310,159 +316,56 @@ function MessageBlock({ message }: { message: ChatMessage }) {
   return <AssistantTurn message={message} />;
 }
 
-function splitThought(text: string): { title: string; body: string } {
-  const trimmed = text.trim();
-  const heading = trimmed.match(/^\*\*(.+?)\*\*\s*(?:\n+([\s\S]*))?$/);
-  if (heading) {
-    return { title: heading[1], body: heading[2]?.trim() ?? "" };
-  }
-  const [first, ...rest] = trimmed.split(/\n+/);
-  const title = first.replace(/^\*\*|\*\*$/g, "").trim() || "Thought";
-  if (rest.length) {
-    return { title, body: rest.join("\n\n").trim() };
-  }
-  if (title.length <= 80) {
-    return { title, body: "" };
-  }
-  return { title: "Thought", body: trimmed };
-}
-
-function Collapse({
-  open,
-  children,
-}: {
-  open: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "grid transition-[grid-template-rows] duration-enter ease-motion motion-reduce:transition-none",
-        open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-      )}
-    >
-      <div className="min-h-0 overflow-hidden">{children}</div>
-    </div>
-  );
-}
-
 function AssistantTurn({ message }: { message: ChatMessage }) {
-  const streaming = Boolean(message.thoughtStreaming);
-  const hasThought = Boolean(message.thought?.trim());
+  const segments = messageSegments(message);
+  const streamingMessage = Boolean(message.streaming);
   const hasContent = Boolean(message.content.trim());
-  const { title, body } = splitThought(message.thought ?? "");
-
-  const [thoughtOpen, setThoughtOpen] = useState(true);
-  const [detailOpen, setDetailOpen] = useState(true);
+  const answerStarted = segments.some((segment) => segment.text.trim());
   const startedAt = useRef<number | null>(null);
   const [seconds, setSeconds] = useState<number | null>(null);
 
   useEffect(() => {
-    if (streaming) {
+    if (streamingMessage && !answerStarted) {
       startedAt.current ??= Date.now();
-      setThoughtOpen(true);
-      setDetailOpen(true);
       return;
     }
     if (startedAt.current != null) {
-      setSeconds(Math.max(1, Math.round((Date.now() - startedAt.current) / 1000)));
-      setDetailOpen(false);
+      const elapsed = Math.max(
+        1,
+        Math.round((Date.now() - startedAt.current) / 1000),
+      );
+      setSeconds((current) => current ?? elapsed);
     }
-  }, [streaming]);
-
-  const thoughtLabel =
-    seconds != null ? `Thought for ${seconds}s` : "Thought";
+  }, [streamingMessage, answerStarted]);
 
   return (
     <div className="group flex max-w-full flex-col gap-2 bg-background">
-      {streaming ? (
-        <div className="flex items-center gap-3">
-          <TwinOrbit size={24} />
-          <p className={threadCopyClass}>Thinking</p>
-        </div>
-      ) : hasThought ? (
-        <button
-          type="button"
-          className="flex items-center gap-2 text-left"
-          onClick={() => setThoughtOpen((open) => !open)}
-          aria-expanded={thoughtOpen}
-        >
-          <p className={cn(threadCopyClass, "text-ink-placeholder")}>
-            {thoughtLabel}
-          </p>
-        </button>
-      ) : null}
-
-      {hasThought ? (
-        <Collapse open={thoughtOpen || streaming}>
-          <div className="flex items-stretch gap-3 pt-2">
-            <div className="flex w-4 shrink-0 flex-col items-center">
-              <button
-                type="button"
-                className="relative z-10 shrink-0 bg-background text-ink-placeholder focus-visible:outline-none"
-                aria-label="Toggle thought"
-                onClick={() => setDetailOpen((open) => !open)}
-              >
-                <Brain className="size-4" strokeWidth={1.5} />
-              </button>
-              <div
-                aria-hidden
-                className="my-2 w-px min-h-6 flex-1 bg-gray-400"
+      {segments.map((segment, index) => {
+        const last = index === segments.length - 1;
+        const segmentStreaming =
+          streamingMessage && last && !segment.text.trim();
+        const segmentComplete = Boolean(segment.text.trim());
+        return (
+          <Fragment key={`${message.id}-${index}`}>
+            {segment.activity.length ? (
+              <ActivityTimeline
+                activity={segment.activity}
+                streaming={segmentStreaming}
+                complete={segmentComplete}
+                summary={segmentSummary(segment.activity, {
+                  includeDuration: index === 0,
+                  seconds,
+                })}
               />
-              {!streaming ? (
-                <CheckCircle
-                  className="relative z-10 size-4 shrink-0 bg-background text-ink-placeholder"
-                  strokeWidth={1.5}
-                />
-              ) : null}
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <button
-                type="button"
-                className="flex min-w-0 items-start gap-2 text-left focus-visible:outline-none"
-                onClick={() => setDetailOpen((open) => !open)}
-                aria-expanded={detailOpen}
-              >
-                <p
-                  className={cn(
-                    threadCopyClass,
-                    "min-w-0 flex-1 font-medium text-ink-placeholder",
-                  )}
-                >
-                  {title}
-                </p>
-              </button>
-              <Collapse open={detailOpen}>
-                <div className="mt-2">
-                  <MarkdownBody
-                    text={streaming ? (message.thought ?? "") : body}
-                    className={cn(
-                      threadCopyClass,
-                      "bg-background text-ink-placeholder",
-                    )}
-                  />
-                </div>
-              </Collapse>
-              {!streaming ? (
-                <p
-                  className={cn(
-                    threadCopyClass,
-                    "mt-auto pt-6 text-ink-placeholder",
-                  )}
-                >
-                  Done
-                </p>
-              ) : null}
-            </div>
-          </div>
-        </Collapse>
-      ) : null}
-
-      {hasContent ? (
-        <div className={cn("min-w-0", threadCopyClass)}>
-          <MarkdownBody text={message.content} />
-        </div>
-      ) : null}
+            ) : null}
+            {segment.text.trim() ? (
+              <div className={cn("min-w-0", threadCopyClass)}>
+                <MarkdownBody text={segment.text} sources={message.sources} />
+              </div>
+            ) : null}
+          </Fragment>
+        );
+      })}
 
       {hasContent ? (
         <div className="flex items-center gap-1 opacity-0 transition-opacity duration-color ease-out group-hover:opacity-100 group-focus-within:opacity-100">

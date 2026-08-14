@@ -4,11 +4,11 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { ChatView } from "@/components/ChatView";
 import { getToken } from "@/lib/api";
+import { segmentsFromParts } from "@/lib/activity";
 import type { ChatMessage } from "@/mocks/data";
 import {
   getConversation,
   notifyConversationsChanged,
-  reasoningFromParts,
   stoppedStorageKey,
   textFromParts,
   type ConversationDetail,
@@ -145,21 +145,19 @@ function ConversationChat({
   const isStreaming = status === "streaming" || status === "submitted";
 
   const displayMessages: ChatMessage[] = messages.map((message, index) => {
-    const content = textFromUIMessage(message);
-    const thought = reasoningFromUIMessage(message);
+    const segments = segmentsFromParts(message.parts);
+    const content = segments.map((segment) => segment.text).join("")
+      || textFromUIMessage(message);
     const isLast = index === messages.length - 1;
     return {
       id: message.id,
       threadId: conversation.id,
       role: message.role === "user" ? "user" : "assistant",
       content,
-      thought: thought || undefined,
-      thoughtStreaming:
-        isStreaming &&
-        isLast &&
-        message.role !== "user" &&
-        Boolean(thought) &&
-        !content.trim(),
+      parts: message.parts.map((part) => ({ ...part })),
+      segments,
+      streaming: isStreaming && isLast && message.role !== "user",
+      sources: sourcesFromUIMessage(message),
     };
   });
 
@@ -219,6 +217,45 @@ function toUIMessages(messages: ConversationMessage[]): UIMessage[] {
           },
         ];
       }
+      if (part.type === "source-url") {
+        return [
+          {
+            type: "source-url" as const,
+            sourceId: String(part.sourceId ?? ""),
+            url: String(part.url ?? ""),
+            title: typeof part.title === "string" ? part.title : undefined,
+            snippet: part.snippet,
+            publishedDate: part.publishedDate,
+          } as UIMessage["parts"][number],
+        ];
+      }
+      if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+        const toolName = String(
+          part.toolName ??
+            (part.type.startsWith("tool-")
+              ? part.type.slice("tool-".length)
+              : "tool"),
+        );
+        const state =
+          part.state === "output-available" ||
+          part.state === "input-available" ||
+          part.state === "input-streaming" ||
+          part.state === "output-error"
+            ? part.state
+            : part.output != null
+              ? "output-available"
+              : "input-available";
+        return [
+          {
+            type: part.type === "dynamic-tool" ? "dynamic-tool" : part.type,
+            toolCallId: String(part.toolCallId ?? ""),
+            toolName,
+            state,
+            input: part.input,
+            output: part.output,
+          } as UIMessage["parts"][number],
+        ];
+      }
       return [];
     }),
   }));
@@ -234,12 +271,26 @@ function textFromUIMessage(message: UIMessage): string {
   );
 }
 
-function reasoningFromUIMessage(message: UIMessage): string {
-  return reasoningFromParts(
-    message.parts.map((part) =>
-      part.type === "reasoning"
-        ? { type: "reasoning", text: part.text }
-        : { type: part.type },
-    ),
-  );
+function sourcesFromUIMessage(message: UIMessage): ChatMessage["sources"] {
+  return message.parts.flatMap((part) => {
+    if (part.type !== "source-url") return [];
+    const extra = part as {
+      sourceId: string;
+      url: string;
+      title?: string;
+      snippet?: string;
+      publishedDate?: string | null;
+    };
+    if (!extra.sourceId || !extra.url) return [];
+    return [
+      {
+        sourceId: extra.sourceId,
+        url: extra.url,
+        title: extra.title,
+        snippet: extra.snippet,
+        publishedDate: extra.publishedDate,
+      },
+    ];
+  });
 }
+

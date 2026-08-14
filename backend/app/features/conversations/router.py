@@ -3,6 +3,8 @@ from typing import Annotated
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.llm.types import LLM
+from app.core.log import AppLogger, get_logger
+from app.core.tools import ToolRegistry
 from app.features.conversations.buffer import StreamStore
 from app.features.conversations.schemas import (
     ConversationCreateResponse,
@@ -31,6 +33,17 @@ def get_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
     return request.app.state.session_factory  # type: ignore[no-any-return]
 
 
+def get_tools(request: Request) -> ToolRegistry:
+    return request.app.state.tools  # type: ignore[no-any-return]
+
+
+def get_log(request: Request) -> AppLogger:
+    log = getattr(request.app.state, "log", None)
+    if isinstance(log, AppLogger):
+        return log
+    return get_logger("chatkb")
+
+
 def get_service(
     session: Annotated[AsyncSession, Depends(get_db)],
     store: Annotated[StreamStore, Depends(get_stream_store)],
@@ -38,8 +51,10 @@ def get_service(
     session_factory: Annotated[
         async_sessionmaker[AsyncSession], Depends(get_session_factory)
     ],
+    tools: Annotated[ToolRegistry, Depends(get_tools)],
+    log: Annotated[AppLogger, Depends(get_log)],
 ) -> ConversationService:
-    return ConversationService(session, store, llm, session_factory)
+    return ConversationService(session, store, llm, session_factory, tools, log)
 
 
 @router.post("/v1/conversations", response_model=ConversationCreateResponse)

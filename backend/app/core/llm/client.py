@@ -6,10 +6,11 @@ import httpx
 
 from app.core.config import Settings, get_settings
 from app.core.llm.types import ChatMessage, StreamEvent
+from app.core.log import AppLogger, get_logger
 
 
 class LLMClient:
-    """OpenAI Responses API client that emits UI-message StreamEvents."""
+    """RAW OPENAI CHUNK Responses API client that emits UI-message StreamEvents."""
 
     def __init__(
         self,
@@ -20,6 +21,7 @@ class LLMClient:
         reasoning_effort: str = "medium",
         reasoning_summary: str = "auto",
         http: httpx.AsyncClient | None = None,
+        log: AppLogger | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
@@ -29,9 +31,14 @@ class LLMClient:
         self._reasoning_summary = reasoning_summary
         self._http = http
         self._owns_http = http is None
+        self.log = log.child("llm") if log is not None else get_logger("chatkb.llm")
 
     @classmethod
-    def from_settings(cls, settings: Settings | None = None) -> "LLMClient":
+    def from_settings(
+        cls,
+        settings: Settings | None = None,
+        log: AppLogger | None = None,
+    ) -> "LLMClient":
         cfg = settings or get_settings()
         return cls(
             api_key=cfg.llm_api_key,
@@ -40,6 +47,7 @@ class LLMClient:
             title_model=cfg.llm_title_model,
             reasoning_effort=cfg.llm_reasoning_effort,
             reasoning_summary=cfg.llm_reasoning_summary,
+            log=log,
         )
 
     async def aclose(self) -> None:
@@ -68,6 +76,7 @@ class LLMClient:
         model: str,
         stream: bool,
         with_reasoning: bool = False,
+        tools: Sequence[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": model,
@@ -75,6 +84,8 @@ class LLMClient:
             "stream": stream,
             "store": False,
         }
+        if tools:
+            body["tools"] = list(tools)
         if with_reasoning and self._reasoning_effort not in ("", "off"):
             body["reasoning"] = {
                 "effort": self._reasoning_effort,
@@ -89,15 +100,19 @@ class LLMClient:
         model: str | None = None,
     ) -> str:
         client = await self._client()
+        body = self._body(
+            messages, model=model or self._title_model, stream=False
+        )
+        headers = self._headers()
+        self.log.curl("POST", f"{self._base_url}/responses", headers, body)
         response = await client.post(
             "/responses",
-            json=self._body(
-                messages, model=model or self._title_model, stream=False
-            ),
-            headers=self._headers(),
+            json=body,
+            headers=headers,
         )
         response.raise_for_status()
         payload = response.json()
+        self.log.debug("RAW OPENAI CHUNK << %s", payload)
         return _output_text(payload)
 
     async def stream(
@@ -105,23 +120,28 @@ class LLMClient:
         messages: Sequence[ChatMessage],
         *,
         model: str | None = None,
+        tools: Sequence[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         client = await self._client()
         mapper = _ResponsesMapper()
         failed = False
+        body = self._body(
+            messages,
+            model=model or self._model,
+            stream=True,
+            with_reasoning=True,
+            tools=tools,
+        )
+        headers = self._headers()
+        self.log.curl("POST", f"{self._base_url}/responses", headers, body)
         async with client.stream(
             "POST",
             "/responses",
-            json=self._body(
-                messages,
-                model=model or self._model,
-                stream=True,
-                with_reasoning=True,
-            ),
-            headers=self._headers(),
+            json=body,
+            headers=headers,
         ) as response:
             response.raise_for_status()
-            async for payload in _iter_sse_payloads(response):
+            async for payload in _iter_sse_payloads(response, log=self.log):
                 for event in mapper.handle(payload):
                     if event.get("type") == "error":
                         failed = True
@@ -133,12 +153,15 @@ class LLMClient:
             yield StreamEvent(type="finish")
 
 
-async def _iter_sse_payloads(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+async def _iter_sse_payloads(
+    response: httpx.Response,
+    log: AppLogger | None = None,
+) -> AsyncIterator[dict[str, Any]]:
     data_lines: list[str] = []
     async for raw in response.aiter_lines():
         line = raw.rstrip("\r")
         if line == "":
-            payload = _parse_sse_data(data_lines)
+            payload = _parse_sse_data(data_lines, log=log)
             data_lines = []
             if payload is not None:
                 yield payload
@@ -147,16 +170,23 @@ async def _iter_sse_payloads(response: httpx.Response) -> AsyncIterator[dict[str
             continue
         if line.startswith("data:"):
             data_lines.append(line[5:].lstrip())
-    payload = _parse_sse_data(data_lines)
+    payload = _parse_sse_data(data_lines, log=log)
     if payload is not None:
         yield payload
 
 
-def _parse_sse_data(data_lines: list[str]) -> dict[str, Any] | None:
+def _parse_sse_data(
+    data_lines: list[str],
+    log: AppLogger | None = None,
+) -> dict[str, Any] | None:
     if not data_lines:
         return None
     data = "\n".join(data_lines).strip()
-    if data == "" or data == "[DONE]":
+    if data == "":
+        return None
+    if log is not None:
+        log.debug("RAW OPENAI CHUNK << %s", data)
+    if data == "[DONE]":
         return None
     parsed: object = json.loads(data)
     if not isinstance(parsed, dict):
@@ -193,7 +223,8 @@ class _ResponsesMapper:
     def __init__(self) -> None:
         self._open_text: dict[str, str] = {}
         self._open_reasoning: dict[str, str] = {}
-        self._named_tools: set[str] = set()
+        self._tool_names: dict[str, str] = {}
+        self._call_ids: dict[str, str] = {}
 
     def handle(self, payload: dict[str, Any]) -> list[StreamEvent]:
         event_type = payload.get("type")
@@ -288,27 +319,33 @@ class _ResponsesMapper:
         if not isinstance(item, dict) or item.get("type") != "function_call":
             return []
         tool_id = _tool_id(item)
+        item_id = item.get("id")
         name = str(item.get("name") or "tool")
-        self._named_tools.add(tool_id)
+        self._remember_tool(tool_id, name)
+        if isinstance(item_id, str) and item_id:
+            self._call_ids[item_id] = tool_id
+            self._remember_tool(item_id, name)
         return [
             StreamEvent(
                 type="tool-input-start",
                 toolCallId=tool_id,
                 toolName=name,
+                providerExecuted=True,
             )
         ]
 
     def _on_tool_delta(self, payload: dict[str, Any]) -> list[StreamEvent]:
-        tool_id = _item_id(payload)
+        tool_id = self._tool_call_id(payload)
         delta = payload.get("delta")
         events: list[StreamEvent] = []
-        if tool_id not in self._named_tools:
-            self._named_tools.add(tool_id)
+        if tool_id not in self._tool_names:
+            self._remember_tool(tool_id, "tool")
             events.append(
                 StreamEvent(
                     type="tool-input-start",
                     toolCallId=tool_id,
                     toolName="tool",
+                    providerExecuted=True,
                 )
             )
         if isinstance(delta, str) and delta:
@@ -321,9 +358,33 @@ class _ResponsesMapper:
             )
         return events
 
-    def _on_tool_done(self, payload: dict[str, Any]) -> list[StreamEvent]:
-        tool_id = _item_id(payload)
+    def _tool_call_id(self, payload: dict[str, Any]) -> str:
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            return call_id
+        item_id = _item_id(payload)
+        return self._call_ids.get(item_id, item_id)
+
+    def _remember_tool(self, tool_id: str, name: str) -> None:
+        if name and name != "tool":
+            self._tool_names[tool_id] = name
+        elif tool_id not in self._tool_names:
+            self._tool_names[tool_id] = name or "tool"
+
+    def _tool_name(self, tool_id: str, payload: dict[str, Any]) -> str:
         name = payload.get("name")
+        if isinstance(name, str) and name and name != "tool":
+            self._remember_tool(tool_id, name)
+            return name
+        stored = self._tool_names.get(tool_id)
+        if stored:
+            return stored
+        item_id = _item_id(payload)
+        return self._tool_names.get(item_id, "tool")
+
+    def _on_tool_done(self, payload: dict[str, Any]) -> list[StreamEvent]:
+        tool_id = self._tool_call_id(payload)
+        name = self._tool_name(tool_id, payload)
         arguments = payload.get("arguments")
         parsed: dict[str, Any] = {}
         if isinstance(arguments, str) and arguments:
@@ -334,21 +395,23 @@ class _ResponsesMapper:
             if isinstance(value, dict):
                 parsed = value
         events: list[StreamEvent] = []
-        if tool_id not in self._named_tools:
-            self._named_tools.add(tool_id)
+        if tool_id not in self._tool_names:
+            self._remember_tool(tool_id, name)
             events.append(
                 StreamEvent(
                     type="tool-input-start",
                     toolCallId=tool_id,
-                    toolName=str(name or "tool"),
+                    toolName=name,
+                    providerExecuted=True,
                 )
             )
         events.append(
             StreamEvent(
                 type="tool-input-available",
                 toolCallId=tool_id,
-                toolName=str(name or "tool"),
+                toolName=name,
                 input=parsed,
+                providerExecuted=True,
             )
         )
         return events
