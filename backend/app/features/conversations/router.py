@@ -7,6 +7,9 @@ from app.core.log import AppLogger, get_logger
 from app.core.tools import ToolRegistry
 from app.features.conversations.buffer import StreamStore
 from app.features.conversations.schemas import (
+    BuildSessionRequest,
+    BuildSessionResponse,
+    ConversationCreateRequest,
     ConversationCreateResponse,
     ConversationDetail,
     ConversationSummary,
@@ -15,7 +18,7 @@ from app.features.conversations.schemas import (
     StopResponse,
 )
 from app.features.conversations.service import ConversationService
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 router = APIRouter(tags=["conversations"])
@@ -61,8 +64,19 @@ def get_service(
 async def create_conversation(
     owner_id: Annotated[str, Depends(get_current_user)],
     service: Annotated[ConversationService, Depends(get_service)],
+    body: Annotated[ConversationCreateRequest | None, Body()] = None,
 ) -> ConversationCreateResponse:
-    return await service.create_conversation(owner_id)
+    agent_id = body.agent_id if body is not None else None
+    return await service.create_conversation(owner_id, agent_id=agent_id)
+
+
+@router.post("/v1/build-sessions", response_model=BuildSessionResponse)
+async def create_build_session(
+    body: BuildSessionRequest,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[ConversationService, Depends(get_service)],
+) -> BuildSessionResponse:
+    return await service.create_build_session(owner_id, body.target_agent_id)
 
 
 @router.get("/v1/conversations", response_model=list[ConversationSummary])

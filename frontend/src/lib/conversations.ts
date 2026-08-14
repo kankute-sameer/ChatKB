@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import type { Agent } from "@/lib/agents";
 
 export interface UIMessagePart {
   type: string;
@@ -18,10 +19,18 @@ export interface ConversationSummary {
   title: string | null;
   activeResponseId: string | null;
   lastEventId: number | null;
+  targetAgentId?: string | null;
+  sessionType?: "chat" | "build";
 }
 
 export interface ConversationDetail extends ConversationSummary {
   messages: ConversationMessage[];
+}
+
+export interface BuildSession {
+  conversation: ConversationDetail;
+  targetAgent: Agent;
+  resumed: boolean;
 }
 
 export const CONVERSATIONS_CHANGED = "chatkb:conversations-changed";
@@ -30,8 +39,22 @@ export function notifyConversationsChanged(): void {
   window.dispatchEvent(new Event(CONVERSATIONS_CHANGED));
 }
 
-export function createConversation(): Promise<ConversationSummary> {
-  return api<ConversationSummary>("/v1/conversations", { method: "POST" });
+export function createConversation(
+  agentId?: string,
+): Promise<ConversationSummary> {
+  return api<ConversationSummary>("/v1/conversations", {
+    method: "POST",
+    body: agentId ? JSON.stringify({ agentId }) : undefined,
+  });
+}
+
+export function createBuildSession(
+  targetAgentId: string,
+): Promise<BuildSession> {
+  return api<BuildSession>("/v1/build-sessions", {
+    method: "POST",
+    body: JSON.stringify({ targetAgentId }),
+  });
 }
 
 export function getConversation(id: string): Promise<ConversationDetail> {

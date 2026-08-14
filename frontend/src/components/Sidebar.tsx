@@ -4,9 +4,9 @@ import { BookOpen, LogOut, PanelLeft, Plus, Search, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useAgentList } from "@/features/agents/useAgentList";
 import { useConversationList } from "@/features/conversations/useConversationList";
-import { agents } from "@/mocks/data";
-import { avatarClass } from "@/design/tokens";
+import { appearanceClassName } from "@/design/tokens";
 import { cn } from "@/lib/utils";
 
 const primaryNav = [
@@ -37,6 +37,7 @@ function rowLinkClass(isActive: boolean, collapsed?: boolean) {
 export function Sidebar() {
   const { logout, username } = useAuth();
   const chats = useConversationList();
+  const agents = useAgentList();
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -114,7 +115,7 @@ export function Sidebar() {
                 <span
                   className={cn(
                     "size-icon shrink-0 rounded-full",
-                    avatarClass[agent.avatar],
+                    appearanceClassName(agent.appearance.key),
                   )}
                 />
                 <RowLabel>{agent.name}</RowLabel>

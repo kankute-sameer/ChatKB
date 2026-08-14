@@ -6,6 +6,7 @@ interface LandingHeroProps {
   composer: ReactNode;
   /** Content below the hero (search, grids, etc.) */
   children?: ReactNode;
+  contentClassName?: string;
 }
 
 /**
@@ -13,7 +14,12 @@ interface LandingHeroProps {
  * With children, stacks from the top so the list sits under the composer.
  * Without children, vertically centers (new chat home).
  */
-export function LandingHero({ title, composer, children }: LandingHeroProps) {
+export function LandingHero({
+  title,
+  composer,
+  children,
+  contentClassName,
+}: LandingHeroProps) {
   const hasChildren = Boolean(children);
 
   return (
@@ -38,7 +44,12 @@ export function LandingHero({ title, composer, children }: LandingHeroProps) {
         </div>
       </div>
       {hasChildren ? (
-        <div className="mx-auto w-full max-w-content px-8 pb-8 pt-6">
+        <div
+          className={cn(
+            "mx-auto w-full max-w-content px-8 pb-8 pt-6",
+            contentClassName,
+          )}
+        >
           {children}
         </div>
       ) : null}

@@ -4,6 +4,7 @@ from logging.config import fileConfig
 from alembic import context
 from app.core.config import get_settings
 from app.core.db import Base
+from app.features.agents import models as agent_models  # noqa: F401
 from app.features.conversations import models as conversation_models  # noqa: F401
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection

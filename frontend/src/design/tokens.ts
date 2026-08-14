@@ -71,6 +71,10 @@ export const tokens = {
     avatar: {
       blue: "#3B82F6",
       red: "#E11D48",
+      pink: "#EC4899",
+      green: "#22C55E",
+      amber: "#F59E0B",
+      violet: "#8B5CF6",
     },
     background: "#FFFFFF",
     foreground: "#141414",
@@ -166,6 +170,23 @@ export const tokens = {
 export const avatarClass = {
   blue: "bg-avatar-blue",
   red: "bg-avatar-red",
+  pink: "bg-avatar-pink",
+  green: "bg-avatar-green",
+  amber: "bg-avatar-amber",
+  violet: "bg-avatar-violet",
 } as const;
 
 export type AvatarColor = keyof typeof avatarClass;
+
+export const appearanceClass: Record<string, string> = {
+  "blue-blur": avatarClass.blue,
+  "red-blur": avatarClass.red,
+  "pink-blur": avatarClass.pink,
+  "green-blur": avatarClass.green,
+  "amber-blur": avatarClass.amber,
+  "violet-blur": avatarClass.violet,
+};
+
+export function appearanceClassName(key: string | undefined): string {
+  return (key && appearanceClass[key]) || avatarClass.blue;
+}

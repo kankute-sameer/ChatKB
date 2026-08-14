@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 interface DetailPanelProps {
   toolbar: ReactNode;
   main: ReactNode;
-  aside: ReactNode;
+  aside?: ReactNode;
 }
 
 export function DetailPanel({ toolbar, main, aside }: DetailPanelProps) {
@@ -14,9 +14,11 @@ export function DetailPanel({ toolbar, main, aside }: DetailPanelProps) {
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 overflow-auto p-8">{main}</div>
-        <aside className="flex w-panel min-w-panel shrink-0 flex-col border-l border-border">
-          {aside}
-        </aside>
+        {aside ? (
+          <aside className="flex w-1/4 min-w-0 shrink-0 flex-col border-l border-border">
+            {aside}
+          </aside>
+        ) : null}
       </div>
     </div>
   );

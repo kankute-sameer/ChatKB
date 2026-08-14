@@ -14,6 +14,14 @@ class Conversation(Base):
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     active_response_id: Mapped[str | None] = mapped_column(String, nullable=True)
     last_event_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    target_agent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    session_type: Mapped[str] = mapped_column(
+        String, default="chat", server_default="chat", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

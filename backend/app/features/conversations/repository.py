@@ -41,11 +41,30 @@ class ConversationRepository:
     async def list_for_owner(self, owner_id: str, limit: int) -> list[Conversation]:
         result = await self.session.execute(
             select(Conversation)
-            .where(Conversation.owner_id == owner_id)
+            .where(
+                Conversation.owner_id == owner_id,
+                Conversation.session_type == "chat",
+            )
             .order_by(Conversation.last_active_at.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def find_build_session(
+        self, owner_id: str, target_agent_id: str
+    ) -> Conversation | None:
+        result = await self.session.execute(
+            select(Conversation)
+            .options(selectinload(Conversation.messages))
+            .where(
+                Conversation.owner_id == owner_id,
+                Conversation.target_agent_id == target_agent_id,
+                Conversation.session_type == "build",
+            )
+            .order_by(Conversation.last_active_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def add_message(
         self,
@@ -78,9 +97,7 @@ class ConversationRepository:
             return existing
         return await self.add_message(conversation_id, message)
 
-    async def latest_assistant_message(
-        self, conversation_id: str
-    ) -> Message | None:
+    async def latest_assistant_message(self, conversation_id: str) -> Message | None:
         result = await self.session.execute(
             select(Message)
             .where(
@@ -112,9 +129,7 @@ class ConversationRepository:
         )
         await self.session.commit()
 
-    async def update_last_event_id(
-        self, conversation_id: str, event_id: int
-    ) -> None:
+    async def update_last_event_id(self, conversation_id: str, event_id: int) -> None:
         await self.session.execute(
             update(Conversation)
             .where(Conversation.id == conversation_id)

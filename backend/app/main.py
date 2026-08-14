@@ -12,6 +12,8 @@ from app.core.exa import ExaClient
 from app.core.llm.client import LLMClient
 from app.core.log import configure_logging
 from app.core.tools import ToolRegistry
+from app.features.agents import models as agent_models  # noqa: F401
+from app.features.agents.router import router as agents_router
 from app.features.auth.router import router as auth_router
 from app.features.conversations import models as conversation_models  # noqa: F401
 from app.features.conversations.buffer import InMemoryStreamStore
@@ -60,6 +62,10 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(
         conversations_router,
+        dependencies=[Depends(get_current_user)],
+    )
+    app.include_router(
+        agents_router,
         dependencies=[Depends(get_current_user)],
     )
 

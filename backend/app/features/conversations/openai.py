@@ -25,9 +25,7 @@ def messages_to_responses_input(
         converted.append({"role": "system", "content": system})
     for message in messages:
         if message.role == "user":
-            converted.append(
-                {"role": "user", "content": _text_content(message.parts)}
-            )
+            converted.append({"role": "user", "content": _text_content(message.parts)})
         elif message.role == "assistant":
             converted.extend(_assistant_to_responses(message.parts))
         elif message.role == "system":

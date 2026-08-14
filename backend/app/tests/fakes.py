@@ -15,9 +15,12 @@ class FakeLLM:
 
         self.chunks = list(chunks or ["Hello", " world"])
         self.title = title
-        self.rounds = [list(round_events) for round_events in rounds] if rounds else None
+        self.rounds = (
+            [list(round_events) for round_events in rounds] if rounds else None
+        )
         self.round_index = 0
         self.calls: list[list[ChatMessage]] = []
+        self.tools_seen: list[Sequence[dict[str, Any]] | None] = []
         self.started = asyncio.Event()
         self.continue_event = asyncio.Event()
         self.continue_event.set()
@@ -29,8 +32,9 @@ class FakeLLM:
         model: str | None = None,
         tools: Sequence[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        del model, tools
+        del model
         self.calls.append(list(messages))
+        self.tools_seen.append(list(tools) if tools is not None else None)
         if self.rounds is not None:
             events = self.rounds[min(self.round_index, len(self.rounds) - 1)]
             self.round_index += 1

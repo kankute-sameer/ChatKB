@@ -26,7 +26,9 @@ import type { ChatMessage } from "@/mocks/data";
 import { cn } from "@/lib/utils";
 
 interface ComposerProps {
-  placeholder: string;
+  placeholder?: string;
+  initialValue?: string;
+  autoFocus?: boolean;
   start?: ReactNode;
   showMic?: boolean;
   onSubmit?: (text: string) => void;
@@ -37,6 +39,8 @@ interface ComposerProps {
 
 export function Composer({
   placeholder,
+  initialValue = "",
+  autoFocus = false,
   start,
   showMic = true,
   onSubmit,
@@ -44,14 +48,24 @@ export function Composer({
   isStreaming = false,
   disabled = false,
 }: ComposerProps) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialValue);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    const len = el.value.length;
+    el.setSelectionRange(len, len);
+  }, [autoFocus]);
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = text.trim();
     if (!trimmed || disabled || isStreaming) return;
     onSubmit?.(trimmed);
-    setText("");
+    setText(initialValue);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -67,6 +81,7 @@ export function Composer({
       className="rounded-lg border border-border bg-background px-composer py-4 shadow-soft"
     >
       <textarea
+        ref={inputRef}
         rows={2}
         placeholder={placeholder}
         value={text}
@@ -123,6 +138,7 @@ interface ChatViewProps {
   emptyState?: ReactNode;
   layout?: "landing" | "thread";
   composerStart?: ReactNode;
+  composerFooter?: ReactNode;
   showMic?: boolean;
   onSubmit?: (text: string) => void;
   onStop?: () => void;
@@ -138,6 +154,7 @@ export function ChatView({
   emptyState,
   layout = "thread",
   composerStart,
+  composerFooter,
   showMic = true,
   onSubmit,
   onStop,
@@ -185,6 +202,7 @@ export function ChatView({
         messages={messages}
         emptyState={emptyState}
         composer={composer}
+        composerFooter={composerFooter}
         isStreaming={isStreaming}
       />
     </div>
@@ -195,11 +213,13 @@ function ThreadBody({
   messages,
   emptyState,
   composer,
+  composerFooter,
   isStreaming,
 }: {
   messages: ChatMessage[];
   emptyState?: ReactNode;
   composer: ReactNode;
+  composerFooter?: ReactNode;
   isStreaming?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -281,7 +301,10 @@ function ThreadBody({
         ) : null}
       </div>
       <div className="px-8 pb-4 pt-0">
-        <div className="mx-auto max-w-composer">{composer}</div>
+        <div className="mx-auto max-w-composer">
+          {composer}
+          {composerFooter}
+        </div>
       </div>
     </>
   );

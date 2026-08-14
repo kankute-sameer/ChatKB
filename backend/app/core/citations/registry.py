@@ -9,7 +9,7 @@ CITE_RE = re.compile(r"\[cite:([^\]]+)\]")
 
 
 class Citations:
-    """Per-generation, in-memory. Holds cite_id -> Source for one answer, then discarded."""
+    """Per-generation, in-memory. Holds cite_id -> Source, then discarded."""
 
     def __init__(self) -> None:
         self._by_id: dict[str, Source] = {}

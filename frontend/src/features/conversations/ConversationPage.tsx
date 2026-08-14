@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { ChatView } from "@/components/ChatView";
+import { ChatView, ComposerStartDefault } from "@/components/ChatView";
 import { getToken } from "@/lib/api";
 import { segmentsFromParts } from "@/lib/activity";
 import type { ChatMessage } from "@/mocks/data";
+import { getAgent, type Agent } from "@/lib/agents";
+import { AgentChip } from "@/features/agents/AgentChip";
 import {
   getConversation,
   notifyConversationsChanged,
@@ -58,23 +60,64 @@ export function ConversationPage() {
     return <div className="p-8 text-sm text-muted-foreground">Loading…</div>;
   }
 
-  return <ConversationChat conversation={conversation} />;
+  return (
+    <ConversationChat conversation={conversation} showTitle />
+  );
 }
 
-function ConversationChat({
+export function ConversationChat({
   conversation,
+  pendingText: pendingTextProp,
+  placeholder = "Ask anything...",
+  header,
+  showTitle = true,
+  showMic = true,
+  composerStart,
+  composerFooter,
+  onSettled,
 }: {
   conversation: ConversationDetail;
+  pendingText?: string;
+  placeholder?: string;
+  header?: ReactNode;
+  showTitle?: boolean;
+  showMic?: boolean;
+  composerStart?: ReactNode;
+  composerFooter?: ReactNode;
+  onSettled?: () => void;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const pendingText = (location.state as LocationState | null)?.pendingText;
+  const pendingText =
+    pendingTextProp ?? (location.state as LocationState | null)?.pendingText;
   const sentPending = useRef(false);
   const [resume, setResume] = useState(
     () => sessionStorage.getItem(stoppedStorageKey(conversation.id)) == null,
   );
 
   const [title, setTitle] = useState(conversation.title ?? "New chat");
+  const [agent, setAgent] = useState<Agent | null>(null);
+
+  useEffect(() => {
+    if (
+      !conversation.targetAgentId ||
+      conversation.sessionType === "build"
+    ) {
+      setAgent(null);
+      return;
+    }
+    let cancelled = false;
+    getAgent(conversation.targetAgentId)
+      .then((latest) => {
+        if (!cancelled) setAgent(latest);
+      })
+      .catch(() => {
+        if (!cancelled) setAgent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation.targetAgentId, conversation.sessionType]);
 
   const transport = useMemo(
     () =>
@@ -143,6 +186,18 @@ function ConversationChat({
   }, [conversation.id, conversation.title]);
 
   const isStreaming = status === "streaming" || status === "submitted";
+  const wasStreaming = useRef(false);
+
+  useEffect(() => {
+    if (isStreaming) {
+      wasStreaming.current = true;
+      return;
+    }
+    if (wasStreaming.current) {
+      wasStreaming.current = false;
+      onSettled?.();
+    }
+  }, [isStreaming, onSettled]);
 
   const displayMessages: ChatMessage[] = messages.map((message, index) => {
     const segments = segmentsFromParts(message.parts);
@@ -181,9 +236,16 @@ function ConversationChat({
 
   return (
     <ChatView
-      title={title}
+      title={showTitle ? title : undefined}
+      header={header}
       messages={displayMessages}
-      placeholder="Ask anything..."
+      placeholder={placeholder}
+      showMic={showMic}
+      composerStart={
+        composerStart ??
+        (agent ? <AgentChip agent={agent} /> : <ComposerStartDefault />)
+      }
+      composerFooter={composerFooter}
       onSubmit={(text) => {
         sessionStorage.removeItem(stoppedStorageKey(conversation.id));
         setResume(true);

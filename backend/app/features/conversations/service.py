@@ -13,12 +13,23 @@ from app.core.llm.types import LLM, ChatMessage, StreamEvent
 from app.core.log import AppLogger, get_logger
 from app.core.tools import ToolRegistry
 from app.core.tools.protocol import ToolResult
+from app.features.agents.builder import ensure_builder_agent
+from app.features.agents.models import Agent
+from app.features.agents.repository import AgentRepository
+from app.features.agents.schemas import AgentResponse
+from app.features.agents.tools import AgentEditorContext, agent_editor_tools
+from app.features.agents.wrapper import (
+    BASE_INSTRUCTIONS,
+    WEB_SEARCH_GUIDANCE,
+    build_system_prompt,
+)
 from app.features.conversations.buffer import EventLog, StreamStore
 from app.features.conversations.models import Conversation, Message
 from app.features.conversations.openai import messages_to_responses_input
-from app.features.conversations.prompts import AGENT_INSTRUCTIONS, TITLE_PROMPT
+from app.features.conversations.prompts import TITLE_PROMPT
 from app.features.conversations.repository import ConversationRepository
 from app.features.conversations.schemas import (
+    BuildSessionResponse,
     ConversationCreateResponse,
     ConversationDetail,
     ConversationSummary,
@@ -141,9 +152,7 @@ def text_from_parts(parts: Sequence[dict[str, Any]]) -> str:
     return "".join(chunks)
 
 
-def validate_text_parts(
-    parts: Sequence[dict[str, Any]], citations: Citations
-) -> None:
+def validate_text_parts(parts: Sequence[dict[str, Any]], citations: Citations) -> None:
     for part in parts:
         if part.get("type") == "text":
             part["text"] = citations.validate(str(part.get("text") or ""))
@@ -234,9 +243,7 @@ def replay_events_from_message(message: Message) -> list[dict[str, Any]]:
     return events
 
 
-async def sse_from_buffer(
-    buffer: EventLog, after_id: int
-) -> AsyncIterator[str]:
+async def sse_from_buffer(buffer: EventLog, after_id: int) -> AsyncIterator[str]:
     async for event_id, payload in buffer.read_from(after_id):
         yield format_sse(event_id, payload)
     yield "data: [DONE]\n\n"
@@ -266,7 +273,12 @@ class ConversationService:
         self.log = log.child("gen") if log is not None else get_logger("chatkb.gen")
         self.repo = ConversationRepository(session)
 
-    async def create_conversation(self, owner_id: str) -> ConversationCreateResponse:
+    async def create_conversation(
+        self, owner_id: str, agent_id: str | None = None
+    ) -> ConversationCreateResponse:
+        target_agent_id = None
+        if agent_id:
+            target_agent_id = (await self._owned_agent(agent_id, owner_id)).id
         now = datetime.now(UTC)
         conversation = Conversation(
             id=new_id("conv"),
@@ -274,6 +286,8 @@ class ConversationService:
             title=None,
             active_response_id=None,
             last_event_id=None,
+            target_agent_id=target_agent_id,
+            session_type="chat",
             created_at=now,
             updated_at=now,
             last_active_at=now,
@@ -282,6 +296,42 @@ class ConversationService:
         await self.session.commit()
         await self.session.refresh(conversation)
         return ConversationCreateResponse.model_validate(conversation)
+
+    async def create_build_session(
+        self, owner_id: str, target_agent_id: str
+    ) -> BuildSessionResponse:
+        target = await self._owned_agent(target_agent_id, owner_id)
+        await ensure_builder_agent(self.session)
+        existing = await self.repo.find_build_session(owner_id, target.id)
+        if existing is not None:
+            await self.session.commit()
+            return BuildSessionResponse(
+                conversation=self._to_detail(existing),
+                target_agent=AgentResponse.model_validate(target),
+                resumed=True,
+            )
+        now = datetime.now(UTC)
+        conversation = Conversation(
+            id=new_id("conv"),
+            owner_id=owner_id,
+            title=f"Build {target.name}",
+            active_response_id=None,
+            last_event_id=None,
+            target_agent_id=target.id,
+            session_type="build",
+            created_at=now,
+            updated_at=now,
+            last_active_at=now,
+        )
+        await self.repo.create(conversation)
+        await self.session.commit()
+        loaded = await self.repo.get(conversation.id)
+        assert loaded is not None
+        return BuildSessionResponse(
+            conversation=self._to_detail(loaded),
+            target_agent=AgentResponse.model_validate(target),
+            resumed=False,
+        )
 
     async def list_conversations(
         self, owner_id: str, limit: int
@@ -293,24 +343,7 @@ class ConversationService:
         self, owner_id: str, conversation_id: str
     ) -> ConversationDetail:
         conversation = await self._owned(conversation_id, owner_id)
-        return ConversationDetail(
-            id=conversation.id,
-            title=conversation.title,
-            messages=[
-                UIMessage(
-                    id=item.id,
-                    role="assistant" if item.role == "assistant" else "user",
-                    parts=item.parts,
-                )
-                for item in conversation.messages
-                if item.role in ("user", "assistant")
-            ],
-            active_response_id=conversation.active_response_id,
-            last_event_id=conversation.last_event_id,
-            created_at=conversation.created_at,
-            updated_at=conversation.updated_at,
-            last_active_at=conversation.last_active_at,
-        )
+        return self._to_detail(conversation)
 
     async def start_response(
         self, owner_id: str, body: CreateResponseRequest
@@ -433,6 +466,40 @@ class ConversationService:
             )
         return conversation
 
+    async def _owned_agent(self, agent_id: str, owner_id: str) -> Agent:
+        agent = await AgentRepository(self.session).get_owned(agent_id, owner_id)
+        if agent is None or agent.is_builder:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found",
+            )
+        return agent
+
+    def _to_detail(self, conversation: Conversation) -> ConversationDetail:
+        session_type = conversation.session_type
+        if session_type not in ("chat", "build"):
+            session_type = "chat"
+        return ConversationDetail(
+            id=conversation.id,
+            title=conversation.title,
+            messages=[
+                UIMessage(
+                    id=item.id,
+                    role="assistant" if item.role == "assistant" else "user",
+                    parts=item.parts,
+                )
+                for item in conversation.messages
+                if item.role in ("user", "assistant")
+            ],
+            active_response_id=conversation.active_response_id,
+            last_event_id=conversation.last_event_id,
+            target_agent_id=conversation.target_agent_id,
+            session_type=session_type,
+            created_at=conversation.created_at,
+            updated_at=conversation.updated_at,
+            last_active_at=conversation.last_active_at,
+        )
+
 
 async def run_generation(
     conversation_id: str,
@@ -458,9 +525,11 @@ async def run_generation(
                 buffer.finish()
                 store.mark_finished(response_id)
                 return
+            scoped_tools = tools_for_conversation(conversation, tools, session_factory)
+            system = await system_prompt_for(session, conversation, scoped_tools)
             input_items = messages_to_responses_input(
                 conversation.messages,
-                system=AGENT_INSTRUCTIONS,
+                system=system,
             )
 
             async def emit(event: dict[str, Any]) -> None:
@@ -472,7 +541,7 @@ async def run_generation(
             await _run_agent_loop(
                 input_items=input_items,
                 llm=llm,
-                tools=tools,
+                tools=scoped_tools,
                 citations=citations,
                 accumulator=accumulator,
                 emit=emit,
@@ -488,9 +557,7 @@ async def run_generation(
                         parts=parts,
                     ),
                 )
-            await repo.set_active_response(
-                conversation_id, None, last_event_id=None
-            )
+            await repo.set_active_response(conversation_id, None, last_event_id=None)
     except asyncio.CancelledError:
         async with session_factory() as session:
             repo = ConversationRepository(session)
@@ -612,7 +679,48 @@ async def _execute_tool(
         return await tool.run(args, citations)
     except Exception as exc:
         logger.warning("Tool %s failed: %s", name, exc)
-        return ToolResult(content=json.dumps({"error": f"search failed: {exc}"}))
+        label = "search failed" if name == "web_search" else f"{name} failed"
+        return ToolResult(content=json.dumps({"error": f"{label}: {exc}"}))
+
+
+def tools_for_conversation(
+    conversation: Conversation,
+    global_tools: ToolRegistry,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> ToolRegistry:
+    if conversation.session_type == "build":
+        if not conversation.target_agent_id:
+            return ToolRegistry()
+        ctx = AgentEditorContext(
+            session_factory=session_factory,
+            target_agent_id=conversation.target_agent_id,
+            owner_id=conversation.owner_id,
+        )
+        return ToolRegistry(agent_editor_tools(ctx))
+    web = global_tools.get("web_search")
+    return ToolRegistry([web] if web is not None else [])
+
+
+async def system_prompt_for(
+    session: AsyncSession,
+    conversation: Conversation,
+    tools: ToolRegistry,
+) -> str:
+    agent = await running_agent(session, conversation)
+    system = build_system_prompt(agent) if agent is not None else BASE_INSTRUCTIONS
+    if tools.get("web_search") is not None:
+        system = f"{system}\n\n{WEB_SEARCH_GUIDANCE}"
+    return system
+
+
+async def running_agent(
+    session: AsyncSession, conversation: Conversation
+) -> Agent | None:
+    if conversation.session_type == "build":
+        return await ensure_builder_agent(session)
+    if not conversation.target_agent_id:
+        return None
+    return await AgentRepository(session).get(conversation.target_agent_id)
 
 
 async def run_title_generation(

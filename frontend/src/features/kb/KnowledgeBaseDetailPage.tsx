@@ -8,10 +8,12 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentCard } from "@/features/agents/AgentCard";
+import type { Agent as LiveAgent } from "@/lib/agents";
 import {
   agentsForKb,
   filesFor,
   getKnowledgeBase,
+  type Agent as MockAgent,
   type KBFile,
 } from "@/mocks/data";
 
@@ -115,11 +117,30 @@ export function KnowledgeBaseDetailPage() {
             <CardGrid
               items={linkedAgents}
               getKey={(agent) => agent.id}
-              renderItem={(agent) => <AgentCard agent={agent} />}
+              renderItem={(agent) => (
+                <AgentCard agent={toLiveAgent(agent)} />
+              )}
             />
           </TabsContent>
         </Tabs>
       </div>
     </div>
   );
+}
+
+function toLiveAgent(agent: MockAgent): LiveAgent {
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.description,
+    instructions: agent.instructions,
+    appearance: {
+      type: "preset",
+      key: agent.avatar === "red" ? "red-blur" : "blue-blur",
+    },
+    visibility: agent.scope === "workspace" ? "workspace" : "personal",
+    isBuilder: agent.id === "agent-creator",
+    createdAt: "",
+    updatedAt: "",
+  };
 }

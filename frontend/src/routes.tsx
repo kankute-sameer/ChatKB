@@ -4,6 +4,7 @@ import { LoginPage } from "@/features/auth/LoginPage";
 import { GuestOnly, RequireAuth } from "@/features/auth/guards";
 import { ChatHomePage } from "@/features/chat/ChatHomePage";
 import { AgentsGalleryPage } from "@/features/agents/AgentsGalleryPage";
+import { AgentChatPage } from "@/features/agents/AgentChatPage";
 import { AgentDetailPage } from "@/features/agents/AgentDetailPage";
 import { ConversationPage } from "@/features/conversations/ConversationPage";
 import { KnowledgeBaseListPage } from "@/features/kb/KnowledgeBaseListPage";
@@ -22,7 +23,8 @@ export const router = createBrowserRouter([
         children: [
           { path: "/", element: <ChatHomePage /> },
           { path: "/agents", element: <AgentsGalleryPage /> },
-          { path: "/agents/:id", element: <AgentDetailPage /> },
+          { path: "/agents/:id", element: <AgentChatPage /> },
+          { path: "/agents/:id/builder", element: <AgentDetailPage /> },
           { path: "/c/:id", element: <ConversationPage /> },
           { path: "/chat/:id", element: <Navigate to="/" replace /> },
           { path: "/kb", element: <KnowledgeBaseListPage /> },
