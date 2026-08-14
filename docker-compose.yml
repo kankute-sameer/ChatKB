@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: chatkb-postgres
+    environment:
+      POSTGRES_USER: chatkb
+      POSTGRES_PASSWORD: chatkb
+      POSTGRES_DB: chatkb
+    ports:
+      - "5433:5432"
+    volumes:
+      - chatkb_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatkb -d chatkb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  chatkb_postgres:
