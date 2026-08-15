@@ -28,6 +28,12 @@ Only cite `cite_id`s that appear in tool results. Never invent one. Never write 
 a raw URL as a citation.
 """
 
+KB_SEARCH_GUIDANCE = """\
+When you use `kb_search`, cite facts with `[cite:<cite_id>]` using the `cite_id` \
+of the result you used, same as web search. Prefer the knowledge base over web \
+search when the answer is likely in the attached documents.
+"""
+
 
 def build_system_prompt(agent: Agent) -> str:
     """Framework wrapper plus the agent's own stored instructions."""

@@ -1,5 +1,6 @@
 import type { AvatarColor } from "@/design/tokens";
 import type { ActivitySegment } from "@/lib/activity";
+import type { CitationSource } from "@/components/ai-elements/inline-citation";
 
 export interface Agent {
   id: string;
@@ -63,7 +64,7 @@ export interface ChatMessage {
   segments?: ActivitySegment[];
   streaming?: boolean;
   citations?: Citation[];
-  sources?: SourceUrl[];
+  sources?: CitationSource[];
 }
 
 export const agents: Agent[] = [

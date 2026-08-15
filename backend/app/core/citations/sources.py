@@ -43,3 +43,60 @@ class WebSource:
             "snippet": self.snippet,
             "published_date": self.published_date,
         }
+
+
+class KbSource:
+    def __init__(
+        self,
+        *,
+        file_id: str,
+        filename: str,
+        page: int,
+        anchor: str,
+        bbox: list[float],
+        collection_id: str,
+        snippet: str,
+    ) -> None:
+        self.file_id = file_id
+        self.filename = filename
+        self.page = page
+        self.anchor = anchor
+        self.bbox = bbox
+        self.collection_id = collection_id
+        self.snippet = snippet
+
+    def dedup_key(self) -> str:
+        return f"{self.file_id}:{self.anchor}"
+
+    def to_source_part(self, cite_id: str) -> dict[str, object]:
+        return {
+            "type": "source-document",
+            "sourceId": cite_id,
+            "mediaType": "application/pdf",
+            "title": self.filename,
+            "fileId": self.file_id,
+            "filename": self.filename,
+            "page": self.page,
+            "anchor": self.anchor,
+            "bbox": self.bbox,
+            "collectionId": self.collection_id,
+            "snippet": self.snippet,
+            "providerMetadata": {
+                "chatkb": {
+                    "fileId": self.file_id,
+                    "page": self.page,
+                    "anchor": self.anchor,
+                    "bbox": self.bbox,
+                    "collectionId": self.collection_id,
+                    "snippet": self.snippet,
+                }
+            },
+        }
+
+    def to_tool_result(self, cite_id: str) -> dict[str, object]:
+        return {
+            "cite_id": cite_id,
+            "filename": self.filename,
+            "page": self.page,
+            "snippet": self.snippet,
+        }

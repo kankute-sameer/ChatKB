@@ -1,4 +1,6 @@
 from app.core.llm.types import StreamEvent
+from app.features.conversations.models import Message
+from app.features.conversations.openai import messages_to_responses_input
 from app.features.conversations.service import PartsAccumulator
 
 
@@ -18,4 +20,24 @@ def test_accumulator_keeps_reasoning_and_text() -> None:
     assert parts == [
         {"type": "reasoning", "text": "Think first.", "state": "done"},
         {"type": "text", "text": "Answer.", "state": "done"},
+    ]
+
+
+def test_openai_converter_strips_document_sources() -> None:
+    message = Message(
+        id="msg_1",
+        conversation_id="con_1",
+        role="assistant",
+        parts=[
+            {
+                "type": "source-document",
+                "sourceId": "abc12345",
+                "filename": "resume.pdf",
+                "page": 2,
+            },
+            {"type": "text", "text": "Answer [cite:abc12345]."},
+        ],
+    )
+    assert messages_to_responses_input([message]) == [
+        {"role": "assistant", "content": "Answer [cite:abc12345]."}
     ]

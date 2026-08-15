@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import type { Collection } from "@/lib/kb";
 
 export interface AgentAppearance {
   type: "preset";
@@ -11,6 +12,7 @@ export interface Agent {
   description: string;
   instructions: string;
   appearance: AgentAppearance;
+  connectors: string[];
   visibility: "personal" | "workspace";
   isBuilder: boolean;
   createdAt: string;
@@ -37,6 +39,20 @@ export function getAgentInstructions(
   return api<{ instructions: string }>(`/v2/agents/${id}/instructions`);
 }
 
+export function getAgentCollections(id: string): Promise<Collection[]> {
+  return api<Collection[]>(`/v2/agents/${id}/collections`);
+}
+
+export function setAgentCollections(
+  id: string,
+  collectionIds: string[],
+): Promise<Collection[]> {
+  return api<Collection[]>(`/v2/agents/${id}/collections`, {
+    method: "PUT",
+    body: JSON.stringify({ collectionIds }),
+  });
+}
+
 export function createAgent(body: {
   name: string;
   description?: string;
@@ -49,7 +65,9 @@ export function createAgent(body: {
 
 export function updateAgent(
   id: string,
-  body: Partial<Pick<Agent, "name" | "description" | "instructions">>,
+  body: Partial<
+    Pick<Agent, "name" | "description" | "instructions" | "connectors">
+  >,
 ): Promise<Agent> {
   return api<Agent>(`/v2/agents/${id}`, {
     method: "PATCH",

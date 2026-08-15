@@ -12,6 +12,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import type { DocumentCitationSource } from "@/components/ai-elements/inline-citation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LandingHero } from "@/components/LandingHero";
@@ -144,6 +145,7 @@ interface ChatViewProps {
   onStop?: () => void;
   isStreaming?: boolean;
   disabled?: boolean;
+  onOpenDocument?: (source: DocumentCitationSource) => void;
 }
 
 export function ChatView({
@@ -160,6 +162,7 @@ export function ChatView({
   onStop,
   isStreaming,
   disabled,
+  onOpenDocument,
 }: ChatViewProps) {
   const composer = (
     <Composer
@@ -204,6 +207,7 @@ export function ChatView({
         composer={composer}
         composerFooter={composerFooter}
         isStreaming={isStreaming}
+        onOpenDocument={onOpenDocument}
       />
     </div>
   );
@@ -215,12 +219,14 @@ function ThreadBody({
   composer,
   composerFooter,
   isStreaming,
+  onOpenDocument,
 }: {
   messages: ChatMessage[];
   emptyState?: ReactNode;
   composer: ReactNode;
   composerFooter?: ReactNode;
   isStreaming?: boolean;
+  onOpenDocument?: (source: DocumentCitationSource) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -277,7 +283,11 @@ function ThreadBody({
             {visibleMessages.length === 0
               ? emptyState
               : visibleMessages.map((message) => (
-                  <MessageBlock key={message.id} message={message} />
+                  <MessageBlock
+                    key={message.id}
+                    message={message}
+                    onOpenDocument={onOpenDocument}
+                  />
                 ))}
             {waitingForText && !lastHasActivity ? <TwinOrbit size={24} /> : null}
           </div>
@@ -310,7 +320,13 @@ function ThreadBody({
   );
 }
 
-function MessageBlock({ message }: { message: ChatMessage }) {
+function MessageBlock({
+  message,
+  onOpenDocument,
+}: {
+  message: ChatMessage;
+  onOpenDocument?: (source: DocumentCitationSource) => void;
+}) {
   if (message.role === "user") {
     return (
       <div className="group flex flex-col items-end gap-2">
@@ -336,10 +352,16 @@ function MessageBlock({ message }: { message: ChatMessage }) {
     );
   }
 
-  return <AssistantTurn message={message} />;
+  return <AssistantTurn message={message} onOpenDocument={onOpenDocument} />;
 }
 
-function AssistantTurn({ message }: { message: ChatMessage }) {
+function AssistantTurn({
+  message,
+  onOpenDocument,
+}: {
+  message: ChatMessage;
+  onOpenDocument?: (source: DocumentCitationSource) => void;
+}) {
   const segments = messageSegments(message);
   const streamingMessage = Boolean(message.streaming);
   const hasContent = Boolean(message.content.trim());
@@ -383,7 +405,11 @@ function AssistantTurn({ message }: { message: ChatMessage }) {
             ) : null}
             {segment.text.trim() ? (
               <div className={cn("min-w-0", threadCopyClass)}>
-                <MarkdownBody text={segment.text} sources={message.sources} />
+                <MarkdownBody
+                  text={segment.text}
+                  sources={message.sources}
+                  onOpenDocument={onOpenDocument}
+                />
               </div>
             ) : null}
           </Fragment>

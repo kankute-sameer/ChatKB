@@ -14,6 +14,14 @@ TEST_PASSWORD = "test-password-123"
 TEST_JWT_SECRET = "test-jwt-secret-not-for-production"
 
 
+@pytest.fixture(autouse=True)
+def aws_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("S3_BUCKET", "test-chatkb-bucket")
+
+
 @pytest.fixture
 def client(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

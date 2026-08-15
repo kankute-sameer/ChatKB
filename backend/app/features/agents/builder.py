@@ -54,6 +54,7 @@ def builder_row() -> dict[str, Any]:
         "description": "Helps you design, refine, and publish work agents.",
         "instructions": BUILDER_INSTRUCTIONS,
         "appearance": {"type": "preset", "key": "blue-blur"},
+        "connectors": [],
         "visibility": "workspace",
         "is_builder": True,
         "created_at": now,

@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { ChatView, ComposerStartDefault } from "@/components/ChatView";
+import { DocumentViewer } from "@/components/DocumentViewer";
+import type { DocumentCitationSource } from "@/components/ai-elements/inline-citation";
 import { getToken } from "@/lib/api";
 import { segmentsFromParts } from "@/lib/activity";
 import type { ChatMessage } from "@/mocks/data";
@@ -97,6 +99,8 @@ export function ConversationChat({
 
   const [title, setTitle] = useState(conversation.title ?? "New chat");
   const [agent, setAgent] = useState<Agent | null>(null);
+  const [openDocument, setOpenDocument] =
+    useState<DocumentCitationSource | null>(null);
 
   useEffect(() => {
     if (
@@ -235,25 +239,47 @@ export function ConversationChat({
   };
 
   return (
-    <ChatView
-      title={showTitle ? title : undefined}
-      header={header}
-      messages={displayMessages}
-      placeholder={placeholder}
-      showMic={showMic}
-      composerStart={
-        composerStart ??
-        (agent ? <AgentChip agent={agent} /> : <ComposerStartDefault />)
-      }
-      composerFooter={composerFooter}
-      onSubmit={(text) => {
-        sessionStorage.removeItem(stoppedStorageKey(conversation.id));
-        setResume(true);
-        void sendMessage({ text });
-      }}
-      onStop={onStop}
-      isStreaming={isStreaming}
-    />
+    <>
+      <div
+        className="h-full min-w-0 transition-[margin] duration-200"
+        style={{
+          marginRight: openDocument
+            ? "clamp(36rem, 60vw, 64rem)"
+            : undefined,
+        }}
+      >
+        <ChatView
+          title={showTitle ? title : undefined}
+          header={header}
+          messages={displayMessages}
+          placeholder={placeholder}
+          showMic={showMic}
+          composerStart={
+            composerStart ??
+            (agent ? <AgentChip agent={agent} /> : <ComposerStartDefault />)
+          }
+          composerFooter={composerFooter}
+          onSubmit={(text) => {
+            sessionStorage.removeItem(stoppedStorageKey(conversation.id));
+            setResume(true);
+            void sendMessage({ text });
+          }}
+          onStop={onStop}
+          isStreaming={isStreaming}
+          onOpenDocument={setOpenDocument}
+        />
+      </div>
+      {openDocument ? (
+        <DocumentViewer
+          fileId={openDocument.fileId}
+          page={openDocument.page}
+          bbox={openDocument.bbox}
+          regions={openDocument.regions}
+          filename={openDocument.filename}
+          onClose={() => setOpenDocument(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -289,6 +315,25 @@ function toUIMessages(messages: ConversationMessage[]): UIMessage[] {
             snippet: part.snippet,
             publishedDate: part.publishedDate,
           } as UIMessage["parts"][number],
+        ];
+      }
+      if (part.type === "source-document") {
+        return [
+          {
+            type: "source-document" as const,
+            sourceId: String(part.sourceId ?? ""),
+            mediaType: String(part.mediaType ?? "application/pdf"),
+            title: String(part.title ?? part.filename ?? ""),
+            fileId: String(part.fileId ?? ""),
+            filename: String(part.filename ?? ""),
+            page: Number(part.page ?? 0),
+            anchor: String(part.anchor ?? ""),
+            bbox: Array.isArray(part.bbox) ? part.bbox : [],
+            regions: Array.isArray(part.regions) ? part.regions : undefined,
+            collectionId: String(part.collectionId ?? ""),
+            snippet: typeof part.snippet === "string" ? part.snippet : undefined,
+            providerMetadata: part.providerMetadata,
+          } as unknown as UIMessage["parts"][number],
         ];
       }
       if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
@@ -334,25 +379,81 @@ function textFromUIMessage(message: UIMessage): string {
 }
 
 function sourcesFromUIMessage(message: UIMessage): ChatMessage["sources"] {
-  return message.parts.flatMap((part) => {
-    if (part.type !== "source-url") return [];
-    const extra = part as {
-      sourceId: string;
-      url: string;
-      title?: string;
-      snippet?: string;
-      publishedDate?: string | null;
-    };
-    if (!extra.sourceId || !extra.url) return [];
-    return [
-      {
-        sourceId: extra.sourceId,
-        url: extra.url,
-        title: extra.title,
-        snippet: extra.snippet,
-        publishedDate: extra.publishedDate,
-      },
-    ];
-  });
+  const sources: NonNullable<ChatMessage["sources"]> = [];
+  for (const part of message.parts) {
+    if (part.type === "source-url") {
+      const extra = part as {
+        sourceId: string;
+        url: string;
+        title?: string;
+        snippet?: string;
+        publishedDate?: string | null;
+      };
+      if (extra.sourceId && extra.url) {
+        sources.push({
+          type: "source-url" as const,
+          sourceId: extra.sourceId,
+          url: extra.url,
+          title: extra.title,
+          snippet: extra.snippet,
+          publishedDate: extra.publishedDate,
+        });
+      }
+      continue;
+    }
+    if (part.type === "source-document") {
+      const extra = part as unknown as {
+        sourceId: string;
+        title?: string;
+        fileId?: string;
+        filename?: string;
+        page?: number;
+        anchor?: string;
+        bbox?: number[];
+        regions?: number[][];
+        collectionId?: string;
+        snippet?: string;
+        providerMetadata?: {
+          chatkb?: Record<string, unknown>;
+        };
+      };
+      const metadata = extra.providerMetadata?.chatkb;
+      const filename = extra.filename ?? extra.title ?? "";
+      if (extra.sourceId && filename) {
+        sources.push({
+          type: "source-document" as const,
+          sourceId: extra.sourceId,
+          fileId: String(extra.fileId ?? metadata?.fileId ?? ""),
+          filename,
+          page: Number(extra.page ?? metadata?.page ?? 0),
+          anchor: String(extra.anchor ?? metadata?.anchor ?? ""),
+          bbox: numericArray(extra.bbox ?? metadata?.bbox),
+          regions: numericRegions(extra.regions ?? metadata?.regions),
+          collectionId: String(
+            extra.collectionId ?? metadata?.collectionId ?? "",
+          ),
+          snippet:
+            extra.snippet ??
+            (typeof metadata?.snippet === "string"
+              ? metadata.snippet
+              : undefined),
+        });
+      }
+    }
+  }
+  return sources;
+}
+
+function numericArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is number => typeof item === "number");
+}
+
+function numericRegions(value: unknown): number[][] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const regions = value
+    .map(numericArray)
+    .filter((region) => region.length === 4);
+  return regions.length ? regions : undefined;
 }
 

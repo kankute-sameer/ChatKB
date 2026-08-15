@@ -4,15 +4,32 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export interface CitationSource {
+export interface WebCitationSource {
+  type?: "source-url";
   sourceId: string;
   url: string;
   title?: string;
   snippet?: string;
   publishedDate?: string | null;
 }
+
+export interface DocumentCitationSource {
+  type: "source-document";
+  sourceId: string;
+  fileId: string;
+  filename: string;
+  page: number;
+  anchor: string;
+  bbox: number[];
+  regions?: number[][];
+  collectionId: string;
+  snippet?: string;
+}
+
+export type CitationSource = WebCitationSource | DocumentCitationSource;
 
 export type InlineCitationProps = ComponentProps<"span">;
 
@@ -26,16 +43,21 @@ export function InlineCitationCard(props: ComponentProps<typeof HoverCard>) {
 
 export type InlineCitationCardTriggerProps = ComponentProps<"button"> & {
   sources: CitationSource[];
+  activeSource?: CitationSource;
+  onOpenDocument?: (source: DocumentCitationSource) => void;
 };
 
 export function InlineCitationCardTrigger({
   sources,
+  activeSource,
+  onOpenDocument,
   className,
   ...props
 }: InlineCitationCardTriggerProps) {
-  const first = sources[0];
+  const first = activeSource ?? sources[0];
   if (!first) return null;
-  const domain = hostname(first.url);
+  const document = isDocumentSource(first);
+  const label = document ? first.filename : hostname(first.url);
   const extra = sources.length > 1 ? ` +${sources.length - 1}` : "";
 
   return (
@@ -48,16 +70,24 @@ export function InlineCitationCardTrigger({
         )}
         onClick={(event) => {
           event.preventDefault();
-          window.open(first.url, "_blank", "noopener,noreferrer");
+          if (document) {
+            onOpenDocument?.(first);
+          } else {
+            window.open(first.url, "_blank", "noopener,noreferrer");
+          }
         }}
         {...props}
       >
-        <img
-          src={faviconUrl(first.url)}
-          alt=""
-          className="size-3 shrink-0 rounded-sm"
-        />
-        <span className="truncate">{domain}{extra}</span>
+        {document ? (
+          <FileText className="size-3 shrink-0" />
+        ) : (
+          <img
+            src={faviconUrl(first.url)}
+            alt=""
+            className="size-3 shrink-0 rounded-sm"
+          />
+        )}
+        <span className="truncate">{label}{extra}</span>
       </button>
     </HoverCardTrigger>
   );
@@ -105,17 +135,29 @@ export function InlineCitationSource({
   );
 }
 
-export function CitationChip({ sources }: { sources: CitationSource[] }) {
-  const resolved = sources.filter((source) => source.url);
+export function CitationChip({
+  sources,
+  onOpenDocument,
+}: {
+  sources: CitationSource[];
+  onOpenDocument?: (source: DocumentCitationSource) => void;
+}) {
+  const [index, setIndex] = useState(0);
+  const resolved = sources.filter((source) =>
+    isDocumentSource(source) ? Boolean(source.filename) : Boolean(source.url),
+  );
   if (resolved.length === 0) return null;
 
-  const [index, setIndex] = useState(0);
   const current = resolved[Math.min(index, resolved.length - 1)] ?? resolved[0];
 
   return (
     <InlineCitation>
       <InlineCitationCard>
-        <InlineCitationCardTrigger sources={resolved} />
+        <InlineCitationCardTrigger
+          sources={resolved}
+          activeSource={current}
+          onOpenDocument={onOpenDocument}
+        />
         <HoverCardContent side="top" className="w-[320px]">
           <InlineCitationCardBody>
             {resolved.length > 1 ? (
@@ -145,23 +187,48 @@ export function CitationChip({ sources }: { sources: CitationSource[] }) {
                 </button>
               </div>
             ) : null}
-            <a
-              href={current.url}
-              target="_blank"
-              rel="noreferrer"
-              className="block rounded hover:bg-gray-50"
-            >
-              <InlineCitationSource
-                title={current.title}
-                url={current.url}
-                description={current.snippet}
-              />
-            </a>
+            {isDocumentSource(current) ? (
+              <div className="flex min-w-0 gap-2">
+                <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-ink">
+                    {current.filename}
+                  </p>
+                  <p className="text-xs text-ink-placeholder">
+                    page {current.page}
+                  </p>
+                  {current.snippet ? (
+                    <p className="mt-1 line-clamp-3 text-xs text-ink-muted">
+                      {current.snippet}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <a
+                href={current.url}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded hover:bg-gray-50"
+              >
+                <InlineCitationSource
+                  title={current.title}
+                  url={current.url}
+                  description={current.snippet}
+                />
+              </a>
+            )}
           </InlineCitationCardBody>
         </HoverCardContent>
       </InlineCitationCard>
     </InlineCitation>
   );
+}
+
+function isDocumentSource(
+  source: CitationSource,
+): source is DocumentCitationSource {
+  return source.type === "source-document";
 }
 
 function hostname(url: string): string {

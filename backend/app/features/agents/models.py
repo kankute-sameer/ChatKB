@@ -16,6 +16,9 @@ class Agent(Base):
     description: Mapped[str] = mapped_column(String, default="", nullable=False)
     instructions: Mapped[str] = mapped_column(Text, default="", nullable=False)
     appearance: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
+    connectors: Mapped[list[Any]] = mapped_column(
+        JsonType, default=lambda: ["web_search"], nullable=False
+    )
     visibility: Mapped[str] = mapped_column(
         String, default="personal", server_default="personal", nullable=False
     )

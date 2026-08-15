@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Globe, Wrench } from "lucide-react";
+import { FileSearch, Globe, Wrench } from "lucide-react";
 
 export type ThoughtActivity = {
   kind: "thought";
@@ -42,6 +42,16 @@ const TOOL_DISPLAY: Record<string, ToolDisplay> = {
     headline: (input) => {
       const query = stringField(input, "query");
       return query ? `Searched the web for ${query}` : "Searched the web";
+    },
+  },
+  kb_search: {
+    summary: "Searched the knowledge base",
+    icon: FileSearch,
+    headline: (input) => {
+      const query = stringField(input, "query");
+      return query
+        ? `Searched the knowledge base for ${query}`
+        : "Searched the knowledge base";
     },
   },
 };
@@ -168,7 +178,11 @@ export function segmentsFromParts(
   };
 
   parts.forEach((part, index) => {
-    if (part.type === "source-url" || part.type === "step-start") return;
+    if (
+      part.type === "source-url" ||
+      part.type === "source-document" ||
+      part.type === "step-start"
+    ) return;
     if (part.type === "reasoning") {
       if (current.text) flush();
       current.activity.push({

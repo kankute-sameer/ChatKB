@@ -30,6 +30,28 @@ python -c "import json; print(json.dumps({'alice': '<hash>', 'bob': '<hash>'}))"
 
 Put the JSON object in `AUTH_USERS` and the secret in `JWT_SECRET`. Set `LLM_API_KEY` for generation.
 
+PDF originals are stored in S3. Configure `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET` in `.env`.
+
+## S3 CORS for the PDF viewer
+
+The document viewer follows an authenticated API redirect to a short-lived
+presigned S3 URL. Apply this CORS configuration to the bucket:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:5173"],
+    "AllowedMethods": ["GET"],
+    "AllowedHeaders": ["Range"],
+    "ExposeHeaders": ["Content-Range", "Content-Length", "Accept-Ranges"]
+  }
+]
+```
+
+Without this configuration, pdf.js range requests can fail silently in the
+browser. Add production frontend origins to `AllowedOrigins` when deploying.
+
 ## Database
 
 Start Postgres from the repo root:

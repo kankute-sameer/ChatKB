@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     llm_reasoning_summary: str = "auto"
     stream_buffer_ttl_seconds: int = 300
     exa_api_key: str
+    gemini_api_key: str = ""
+    ingestion_model: str = "gpt-4.1-mini"
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = 1536
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    aws_region: str
+    s3_bucket: str
     log_level: str = "DEBUG"
 
     @field_validator("auth_users", mode="before")

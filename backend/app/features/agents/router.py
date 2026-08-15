@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.features.agents.schemas import (
+    AgentCollectionsUpdate,
     AgentCreateRequest,
     AgentInstructionsResponse,
     AgentResponse,
     AgentUpdateRequest,
 )
 from app.features.agents.service import AgentService
+from app.features.kb.schemas import CollectionResponse
 
 router = APIRouter(tags=["agents"])
 
@@ -78,3 +80,28 @@ async def delete_agent(
 ) -> Response:
     await service.delete(owner_id, agent_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/v2/agents/{agent_id}/collections",
+    response_model=list[CollectionResponse],
+)
+async def list_agent_collections(
+    agent_id: str,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[AgentService, Depends(get_service)],
+) -> list[CollectionResponse]:
+    return await service.list_collections(owner_id, agent_id)
+
+
+@router.put(
+    "/v2/agents/{agent_id}/collections",
+    response_model=list[CollectionResponse],
+)
+async def set_agent_collections(
+    agent_id: str,
+    body: AgentCollectionsUpdate,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[AgentService, Depends(get_service)],
+) -> list[CollectionResponse]:
+    return await service.set_collections(owner_id, agent_id, body)

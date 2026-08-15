@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from app.core.llm.types import ChatMessage, StreamEvent
+from app.features.kb.ingestion.embed import DOCUMENT_TASK_TYPE
+from app.features.kb.models import EMBEDDING_DIMENSIONS
 
 
 class FakeLLM:
@@ -60,3 +62,37 @@ class FakeLLM:
     ) -> str:
         del messages, model
         return self.title
+
+
+class FakeEmbedder:
+    def __init__(self, dimensions: int = EMBEDDING_DIMENSIONS) -> None:
+        self.dimensions = dimensions
+        self.texts: list[str] = []
+        self.task_types: list[str] = []
+
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        task_type: str = DOCUMENT_TASK_TYPE,
+    ) -> list[list[float]]:
+        self.texts.extend(texts)
+        self.task_types.append(task_type)
+        return [[0.01] * self.dimensions for _ in texts]
+
+
+class FakeStorage:
+    def __init__(self) -> None:
+        self.puts: list[tuple[str, bytes, str]] = []
+        self.deletes: list[str] = []
+        self.presigned: list[tuple[str, int]] = []
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        self.puts.append((key, data, content_type))
+
+    async def presigned_get_url(self, key: str, expires_in: int = 300) -> str:
+        self.presigned.append((key, expires_in))
+        return f"https://example-bucket.s3.amazonaws.com/{key}?signature=test"
+
+    async def delete(self, key: str) -> None:
+        self.deletes.append(key)

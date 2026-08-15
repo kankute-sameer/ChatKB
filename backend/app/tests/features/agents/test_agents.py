@@ -9,9 +9,11 @@ from app.core.llm.types import StreamEvent
 from app.features.agents.appearance import APPEARANCE_PRESETS
 from app.features.agents.builder import BUILDER_AGENT_ID
 from app.features.agents.wrapper import BASE_INSTRUCTIONS, build_system_prompt
+from app.features.kb.retrieve import ChunkHit
+from app.features.kb.tools import KbSearchTool
 from app.main import create_app
 from app.tests.conftest import TEST_JWT_SECRET, TEST_PASSWORD, TEST_USERNAME
-from app.tests.fakes import FakeLLM
+from app.tests.fakes import FakeEmbedder, FakeLLM
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from passlib.context import CryptContext
@@ -99,6 +101,57 @@ async def test_create_agent_assigns_preset_and_empty_instructions(
     assert isinstance(appearance, dict)
     assert appearance["type"] == "preset"
     assert appearance["key"] in APPEARANCE_PRESETS
+    assert body["connectors"] == ["web_search"]
+
+
+@pytest.mark.asyncio
+async def test_remove_web_search_connector_drops_tool(
+    client: AsyncClient, fake_llm: FakeLLM
+) -> None:
+    token = await _token(client)
+    created = await _create_agent(client, token)
+    agent_id = str(created["id"])
+
+    patched = await client.patch(
+        f"/v2/agents/{agent_id}",
+        headers=_headers(token),
+        json={"connectors": [], "instructions": "No search."},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["connectors"] == []
+
+    chat = await client.post(
+        "/v1/conversations",
+        headers=_headers(token),
+        json={"agentId": agent_id},
+    )
+    assert chat.status_code == 200
+    conversation_id = str(chat.json()["id"])
+
+    response = await client.post(
+        "/v1/responses",
+        headers=_headers(token),
+        json={
+            "id": conversation_id,
+            "message": {
+                "id": "msg_user_no_search",
+                "role": "user",
+                "parts": USER_PARTS,
+            },
+            "stream": True,
+            "trigger": "submit-message",
+        },
+    )
+    assert response.status_code == 200
+    assert fake_llm.calls
+    tool_names = {
+        item.get("name")
+        for item in (fake_llm.tools_seen[0] or [])
+        if isinstance(item, dict)
+    }
+    assert "web_search" not in tool_names
+    system = str(fake_llm.calls[0][0].get("content") or "")
+    assert "When you use `web_search`" not in system
 
 
 @pytest.mark.asyncio
@@ -134,6 +187,51 @@ async def test_agent_crud_and_instructions_endpoint(client: AsyncClient) -> None
     assert deleted.status_code == 204
     missing = await client.get(f"/v2/agents/{agent_id}", headers=_headers(token))
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_agent_collections_replace_set_and_validate_ids(
+    client: AsyncClient,
+) -> None:
+    token = await _token(client)
+    agent = await _create_agent(client, token)
+    collection_ids: list[str] = []
+    for name in ("Resumes", "Policies"):
+        created = await client.post(
+            "/v1/collections",
+            headers=_headers(token),
+            json={"name": name},
+        )
+        assert created.status_code == 200
+        collection_ids.append(str(created.json()["id"]))
+
+    attached = await client.put(
+        f"/v2/agents/{agent['id']}/collections",
+        headers=_headers(token),
+        json={"collectionIds": collection_ids},
+    )
+    assert attached.status_code == 200
+    assert [row["id"] for row in attached.json()] == collection_ids
+
+    replaced = await client.put(
+        f"/v2/agents/{agent['id']}/collections",
+        headers=_headers(token),
+        json={"collectionIds": [collection_ids[1]]},
+    )
+    assert replaced.status_code == 200
+    assert [row["id"] for row in replaced.json()] == [collection_ids[1]]
+
+    invalid = await client.put(
+        f"/v2/agents/{agent['id']}/collections",
+        headers=_headers(token),
+        json={"collectionIds": ["col_not_owned"]},
+    )
+    assert invalid.status_code == 400
+    listed = await client.get(
+        f"/v2/agents/{agent['id']}/collections",
+        headers=_headers(token),
+    )
+    assert [row["id"] for row in listed.json()] == [collection_ids[1]]
 
 
 @pytest.mark.asyncio
@@ -204,6 +302,114 @@ async def test_conversation_with_agent_uses_wrapped_system_prompt(
     }
     assert "web_search" in tool_names
     assert "get_agent_setup" not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_attached_collections_scope_kb_tool_and_persist_document_source(
+    client: AsyncClient,
+    app: FastAPI,
+    fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = await _token(client)
+    agent = await _create_agent(client, token)
+    collection = await client.post(
+        "/v1/collections",
+        headers=_headers(token),
+        json={"name": "Resume"},
+    )
+    collection_id = str(collection.json()["id"])
+    attached = await client.put(
+        f"/v2/agents/{agent['id']}/collections",
+        headers=_headers(token),
+        json={"collectionIds": [collection_id]},
+    )
+    assert attached.status_code == 200
+
+    seen: dict[str, object] = {}
+
+    async def fake_search(
+        query: str,
+        collection_ids: list[str],
+        **kwargs: object,
+    ) -> list[ChunkHit]:
+        seen["query"] = query
+        seen["collection_ids"] = collection_ids
+        return [
+            ChunkHit(
+                chunk_id="chunk_resume",
+                file_id="file_resume",
+                collection_id=collection_id,
+                text="Five years of Python experience.",
+                section_header="Experience",
+                page=2,
+                anchor="experience-1",
+                bbox=[0.1, 0.2, 0.8, 0.4],
+                filename="resume.pdf",
+                score=0.03,
+            )
+        ]
+
+    monkeypatch.setattr("app.features.kb.tools.hybrid_search", fake_search)
+    app.state.tools.register(
+        KbSearchTool(FakeEmbedder(), app.state.session_factory)
+    )
+    fake_llm.rounds = [
+        [
+            StreamEvent(
+                type="tool-input-start",
+                toolCallId="call_kb",
+                toolName="kb_search",
+                providerExecuted=True,
+            ),
+            StreamEvent(
+                type="tool-input-available",
+                toolCallId="call_kb",
+                toolName="kb_search",
+                input={"query": "Python experience"},
+                providerExecuted=True,
+            ),
+        ],
+        [
+            StreamEvent(type="text-start", id="text_kb"),
+            StreamEvent(type="text-delta", id="text_kb", delta="Found it."),
+            StreamEvent(type="text-end", id="text_kb"),
+        ],
+    ]
+
+    conversation = await client.post(
+        "/v1/conversations",
+        headers=_headers(token),
+        json={"agentId": agent["id"]},
+    )
+    conversation_id = str(conversation.json()["id"])
+    response = await client.post(
+        "/v1/responses",
+        headers=_headers(token),
+        json={
+            "id": conversation_id,
+            "message": {
+                "id": "msg_user_kb",
+                "role": "user",
+                "parts": USER_PARTS,
+            },
+            "stream": True,
+            "trigger": "submit-message",
+        },
+    )
+    assert response.status_code == 200
+    assert seen == {
+        "query": "Python experience",
+        "collection_ids": [collection_id],
+    }
+    loaded = await client.get(
+        f"/v1/conversations/{conversation_id}",
+        headers=_headers(token),
+    )
+    parts = loaded.json()["messages"][-1]["parts"]
+    document = next(part for part in parts if part["type"] == "source-document")
+    assert document["filename"] == "resume.pdf"
+    assert document["page"] == 2
 
 
 @pytest.mark.asyncio

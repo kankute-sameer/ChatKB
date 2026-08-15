@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import {
   CitationChip,
   type CitationSource,
+  type DocumentCitationSource,
 } from "@/components/ai-elements/inline-citation";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,10 @@ function rewriteCiteMarkers(text: string): string {
   });
 }
 
-function markdownComponents(sources: CitationSource[]): Components {
+function markdownComponents(
+  sources: CitationSource[],
+  onOpenDocument?: (source: DocumentCitationSource) => void,
+): Components {
   const byId = new Map(
     sources.map((source) => [source.sourceId.toLowerCase(), source]),
   );
@@ -53,7 +57,7 @@ function markdownComponents(sources: CitationSource[]): Components {
     },
     pre: ({ children }) => <pre className="mb-3 last:mb-0">{children}</pre>,
     a: ({ href, children }) => {
-      const chip = citeChip(href, byId);
+      const chip = citeChip(href, byId, onOpenDocument);
       if (chip !== undefined) return chip;
       return (
         <a href={href} className="text-accent underline" target="_blank" rel="noreferrer">
@@ -67,6 +71,7 @@ function markdownComponents(sources: CitationSource[]): Components {
 function citeChip(
   href: string | undefined,
   byId: Map<string, CitationSource>,
+  onOpenDocument?: (source: DocumentCitationSource) => void,
 ): ReactNode {
   if (!href?.startsWith(CITE_PREFIX)) return undefined;
   const ids = href.slice(CITE_PREFIX.length).split(",").filter(Boolean);
@@ -74,20 +79,25 @@ function citeChip(
     .map((id) => byId.get(id.toLowerCase()))
     .filter((source): source is CitationSource => Boolean(source));
   if (resolved.length === 0) return null;
-  return <CitationChip sources={resolved} />;
+  return <CitationChip sources={resolved} onOpenDocument={onOpenDocument} />;
 }
 
 export function MarkdownBody({
   text,
   className,
   sources = [],
+  onOpenDocument,
 }: {
   text: string;
   className?: string;
   sources?: CitationSource[];
+  onOpenDocument?: (source: DocumentCitationSource) => void;
 }) {
   const rewritten = useMemo(() => rewriteCiteMarkers(text), [text]);
-  const components = useMemo(() => markdownComponents(sources), [sources]);
+  const components = useMemo(
+    () => markdownComponents(sources, onOpenDocument),
+    [sources, onOpenDocument],
+  );
   return (
     <div className={cn("min-w-0", className)}>
       <Markdown remarkPlugins={[remarkGfm]} components={components}>

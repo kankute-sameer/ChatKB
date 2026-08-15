@@ -11,6 +11,7 @@ from app.core.deps import get_current_user
 from app.core.exa import ExaClient
 from app.core.llm.client import LLMClient
 from app.core.log import configure_logging
+from app.core.storage import S3Storage
 from app.core.tools import ToolRegistry
 from app.features.agents import models as agent_models  # noqa: F401
 from app.features.agents.router import router as agents_router
@@ -19,6 +20,10 @@ from app.features.conversations import models as conversation_models  # noqa: F4
 from app.features.conversations.buffer import InMemoryStreamStore
 from app.features.conversations.router import router as conversations_router
 from app.features.conversations.tools import WebSearchTool
+from app.features.kb import models as kb_models  # noqa: F401
+from app.features.kb.ingestion.embed import GeminiEmbedder
+from app.features.kb.router import router as kb_router
+from app.features.kb.tools import KbSearchTool
 
 
 @asynccontextmanager
@@ -30,12 +35,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     store = InMemoryStreamStore(ttl_seconds=settings.stream_buffer_ttl_seconds)
     llm = LLMClient.from_settings(settings, log=log)
     exa = ExaClient.from_settings(settings, log=log)
-    tools = ToolRegistry([WebSearchTool(exa)])
+    embedder = GeminiEmbedder.from_settings(settings)
+    storage = S3Storage.from_settings(settings)
+    await storage.start()
+    tools = ToolRegistry(
+        [
+            WebSearchTool(exa),
+            KbSearchTool(embedder, session_factory),
+        ]
+    )
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.stream_store = store
     app.state.llm = llm
     app.state.exa = exa
+    app.state.embedder = embedder
+    app.state.storage = storage
     app.state.tools = tools
     app.state.log = log
     cleanup = asyncio.create_task(store.cleanup_loop())
@@ -45,6 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cleanup.cancel()
         await llm.aclose()
         await exa.aclose()
+        await storage.aclose()
         await engine.dispose()
 
 
@@ -66,6 +82,10 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         agents_router,
+        dependencies=[Depends(get_current_user)],
+    )
+    app.include_router(
+        kb_router,
         dependencies=[Depends(get_current_user)],
     )
 
