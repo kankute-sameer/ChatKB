@@ -1,12 +1,22 @@
+import base64
 import json
 from collections.abc import AsyncIterator, Sequence
+from io import BytesIO
 from typing import Any
 
 import httpx
+from PIL import Image
 
 from app.core.config import Settings, get_settings
 from app.core.llm.types import ChatMessage, StreamEvent
 from app.core.log import AppLogger, get_logger
+
+IMAGE_DESCRIPTION_PROMPT = (
+    "Describe this image concisely for search and retrieval. If it contains text, "
+    "tables, charts, or data, transcribe them accurately (exact values, labels, "
+    "and table contents). If it is a photo or diagram, describe what it depicts. "
+    "Output only the description."
+)
 
 
 class LLMClient:
@@ -18,6 +28,7 @@ class LLMClient:
         base_url: str,
         model: str,
         title_model: str,
+        vision_model: str = "gpt-4.1-mini",
         reasoning_effort: str = "medium",
         reasoning_summary: str = "auto",
         http: httpx.AsyncClient | None = None,
@@ -27,6 +38,7 @@ class LLMClient:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._title_model = title_model
+        self._vision_model = vision_model
         self._reasoning_effort = reasoning_effort
         self._reasoning_summary = reasoning_summary
         self._http = http
@@ -45,6 +57,7 @@ class LLMClient:
             base_url=cfg.llm_base_url,
             model=cfg.llm_model,
             title_model=cfg.llm_title_model,
+            vision_model=cfg.llm_vision_model,
             reasoning_effort=cfg.llm_reasoning_effort,
             reasoning_summary=cfg.llm_reasoning_summary,
             log=log,
@@ -114,6 +127,50 @@ class LLMClient:
         payload = response.json()
         self.log.debug("RAW OPENAI CHUNK << %s", payload)
         return _output_text(payload)
+
+    async def describe_image(self, image: Image.Image) -> str:
+        try:
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+            body: dict[str, Any] = {
+                "model": self._vision_model,
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": IMAGE_DESCRIPTION_PROMPT,
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:image/png;base64,{encoded}",
+                            },
+                        ],
+                    }
+                ],
+                "stream": False,
+                "store": False,
+            }
+            client = await self._client()
+            headers = self._headers()
+            self.log.debug(
+                "OPENAI VISION REQUEST: model=%s image_bytes=%s",
+                self._vision_model,
+                len(buffer.getvalue()),
+            )
+            response = await client.post(
+                "/responses",
+                json=body,
+                headers=headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return _output_text(payload)
+        except Exception as exc:
+            self.log.warning("image description skipped: %s", exc)
+            return ""
 
     async def stream(
         self,

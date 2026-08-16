@@ -41,6 +41,7 @@ async def app(
         async with application.state.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         application.state.llm = fake_llm
+        application.state.image_describer = fake_llm
         application.state.embedder = FakeEmbedder()
         application.state.storage = FakeStorage()
         yield application

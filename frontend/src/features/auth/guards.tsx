@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "@/features/auth/AuthProvider";
 
@@ -21,4 +22,15 @@ export function GuestOnly() {
     return <Navigate to="/" replace />;
   }
   return <Outlet />;
+}
+
+export function AliceOnly({ children }: { children: ReactNode }) {
+  const { username, ready } = useAuth();
+  if (!ready) {
+    return <div className="h-full bg-background" />;
+  }
+  if (username !== "alice") {
+    return <Navigate to="/" replace />;
+  }
+  return children;
 }

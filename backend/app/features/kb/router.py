@@ -6,17 +6,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_alice
 from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage, get_storage
+from app.features.kb.ingestion.describe_image import ImageDescriber
 from app.features.kb.ingestion.embed import Embedder
 from app.features.kb.schemas import (
     CollectionCreateRequest,
+    CollectionIndexResponse,
     CollectionResponse,
     KbFileResponse,
     KbFileSummary,
     KbFileViewResponse,
+    ObservabilityQueryRequest,
+    ObservabilityQueryResponse,
 )
 from app.features.kb.service import KbService
 
@@ -29,6 +33,10 @@ def get_llm(request: Request) -> LLM:
 
 def get_embedder(request: Request) -> Embedder:
     return request.app.state.embedder  # type: ignore[no-any-return]
+
+
+def get_image_describer(request: Request) -> ImageDescriber:
+    return request.app.state.image_describer  # type: ignore[no-any-return]
 
 
 def get_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
@@ -49,6 +57,7 @@ def get_service(
     ],
     llm: Annotated[LLM, Depends(get_llm)],
     embedder: Annotated[Embedder, Depends(get_embedder)],
+    image_describer: Annotated[ImageDescriber, Depends(get_image_describer)],
     storage: Annotated[Storage, Depends(get_storage)],
     log: Annotated[AppLogger, Depends(get_log)],
 ) -> KbService:
@@ -58,6 +67,7 @@ def get_service(
         session_factory,
         llm,
         embedder,
+        image_describer,
         storage,
         settings,
         log,
@@ -88,6 +98,18 @@ async def get_collection(
     service: Annotated[KbService, Depends(get_service)],
 ) -> CollectionResponse:
     return await service.get_collection(owner_id, collection_id)
+
+
+@router.get(
+    "/v1/collections/{collection_id}/index",
+    response_model=CollectionIndexResponse,
+)
+async def get_collection_index(
+    collection_id: str,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[KbService, Depends(get_service)],
+) -> CollectionIndexResponse:
+    return await service.get_collection_index(owner_id, collection_id)
 
 
 @router.delete(
@@ -175,3 +197,21 @@ async def view_file(
     service: Annotated[KbService, Depends(get_service)],
 ) -> KbFileViewResponse:
     return await service.view_file(owner_id, file_id)
+
+
+@router.post(
+    "/v1/observability/collections/{collection_id}/query",
+    response_model=ObservabilityQueryResponse,
+)
+async def query_collection_for_observability(
+    collection_id: str,
+    body: ObservabilityQueryRequest,
+    owner_id: Annotated[str, Depends(require_alice)],
+    service: Annotated[KbService, Depends(get_service)],
+) -> ObservabilityQueryResponse:
+    return await service.query_collection_for_observability(
+        owner_id,
+        collection_id,
+        body.query,
+        body.limit,
+    )

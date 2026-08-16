@@ -54,6 +54,7 @@ class Collection(Base):
     visibility: Mapped[str] = mapped_column(
         String, default="personal", server_default="personal", nullable=False
     )
+    index_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -90,7 +91,7 @@ class KbFile(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content_md: Mapped[str | None] = mapped_column(Text, nullable=True)
-    index_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

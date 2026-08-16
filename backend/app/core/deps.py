@@ -24,3 +24,14 @@ def get_current_user(
     if subject is None:
         raise unauthorized
     return subject
+
+
+def require_alice(
+    username: Annotated[str, Depends(get_current_user)],
+) -> str:
+    if username != "alice":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Observability is only available to Alice",
+        )
+    return username

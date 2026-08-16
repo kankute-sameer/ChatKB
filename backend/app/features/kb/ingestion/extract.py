@@ -4,13 +4,15 @@ import csv
 import json
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+from docling_core.types.doc.items.picture.picture import PictureItem
 from markdown_it import MarkdownIt
+from PIL import Image
 
 
 class Block(TypedDict):
@@ -23,10 +25,20 @@ class Block(TypedDict):
 
 
 @dataclass(frozen=True)
+class ExtractedImage:
+    image: Image.Image
+    insert_at: int
+    page: int
+    anchor: str
+    bbox: list[float]
+
+
+@dataclass(frozen=True)
 class ProseExtraction:
     kind: Literal["prose"]
     blocks: list[Block]
     page_count: int | None
+    images: list[ExtractedImage] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,6 +89,8 @@ def _build_converter() -> Any:
     options = PdfPipelineOptions()
     options.do_ocr = False
     options.do_table_structure = True
+    options.generate_picture_images = True
+    options.images_scale = 2.0
     return DocumentConverter(
         allowed_formats=[InputFormat.PDF, InputFormat.DOCX],
         format_options={
@@ -85,15 +99,23 @@ def _build_converter() -> Any:
     )
 
 
-def extract(path: str | Path, mime_type: str) -> ExtractionResult:
+def extract(
+    path: str | Path,
+    mime_type: str,
+    *,
+    image_min_dimension_px: int = 64,
+) -> ExtractionResult:
     """Route a supported resource to its normalized prose or table extractor."""
     file_path = Path(path)
     extension = file_path.suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Unsupported file type: {extension or mime_type}")
     if extension == ".pdf":
-        blocks, page_count = extract_pdf(file_path)
-        return ProseExtraction("prose", blocks, page_count)
+        blocks, page_count, images = extract_pdf(
+            file_path,
+            image_min_dimension_px=image_min_dimension_px,
+        )
+        return ProseExtraction("prose", blocks, page_count, images)
     if extension == ".docx":
         return ProseExtraction("prose", extract_docx(file_path), None)
     if extension == ".md":
@@ -131,11 +153,18 @@ def normalize_bbox(
     ]
 
 
-def extract_pdf(path: str | Path) -> tuple[list[Block], int]:
+def extract_pdf(
+    path: str | Path,
+    *,
+    image_min_dimension_px: int = 64,
+) -> tuple[list[Block], int, list[ExtractedImage]]:
     converter = get_converter()
     result = converter.convert(str(path))
     document = result.document
-    blocks = blocks_from_document(document, include_locations=True)
+    blocks, images = blocks_and_images_from_document(
+        document,
+        image_min_dimension_px=max(1, image_min_dimension_px),
+    )
     pages = getattr(document, "pages", None) or {}
     if pages:
         page_count = len(pages)
@@ -144,7 +173,7 @@ def extract_pdf(path: str | Path) -> tuple[list[Block], int]:
             (block["page"] or 0 for block in blocks),
             default=0,
         )
-    return blocks, page_count
+    return blocks, page_count, images
 
 
 def extract_docx(path: str | Path) -> list[Block]:
@@ -375,6 +404,68 @@ def blocks_from_document(
             }
         )
     return blocks
+
+
+def blocks_and_images_from_document(
+    document: Any,
+    *,
+    image_min_dimension_px: int,
+) -> tuple[list[Block], list[ExtractedImage]]:
+    blocks: list[Block] = []
+    images: list[ExtractedImage] = []
+    page_indexes: dict[int, int] = {}
+    for item, _level in document.iterate_items():
+        if _is_picture_item(item):
+            image = _picture_image(item, document)
+            if image is None or min(image.size) < image_min_dimension_px:
+                continue
+            page, bbox = _item_location(item, document)
+            page_indexes[page] = page_indexes.get(page, 0) + 1
+            images.append(
+                ExtractedImage(
+                    image=image,
+                    insert_at=len(blocks),
+                    page=page,
+                    anchor=f"p{page}-{page_indexes[page]}",
+                    bbox=bbox,
+                )
+            )
+            continue
+
+        label = _item_label(item)
+        text = _item_text(item, document)
+        if not text:
+            continue
+        page, bbox = _item_location(item, document)
+        page_indexes[page] = page_indexes.get(page, 0) + 1
+        blocks.append(
+            {
+                "text": text,
+                "block_type": label,
+                "page": page,
+                "anchor": f"p{page}-{page_indexes[page]}",
+                "bbox": bbox,
+                "is_heading": label in HEADING_LABELS,
+            }
+        )
+    return blocks, images
+
+
+def _is_picture_item(item: Any) -> bool:
+    return isinstance(item, PictureItem) or _item_label(item) in {"picture", "chart"}
+
+
+def _picture_image(item: Any, document: Any) -> Image.Image | None:
+    get_image = getattr(item, "get_image", None)
+    if not callable(get_image):
+        return None
+    try:
+        image = get_image(document)
+    except Exception:
+        return None
+    if not isinstance(image, Image.Image):
+        return None
+    return image.copy()
 
 
 def _item_label(item: Any) -> str:

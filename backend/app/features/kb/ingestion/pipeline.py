@@ -12,8 +12,16 @@ from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage
 from app.features.kb.db import KbRepository
-from app.features.kb.ingestion.assemble import assemble_content, generate_index
+from app.features.kb.ingestion.assemble import (
+    assemble_collection_index,
+    assemble_content,
+    generate_file_summary,
+)
 from app.features.kb.ingestion.chunk import chunk_blocks
+from app.features.kb.ingestion.describe_image import (
+    ImageDescriber,
+    insert_image_descriptions,
+)
 from app.features.kb.ingestion.embed import Embedder
 from app.features.kb.ingestion.extract import ProseExtraction, extract
 from app.features.kb.ingestion.table import prepare_table
@@ -33,6 +41,9 @@ async def run_ingestion(
     owner_id: str,
     ingestion_model: str,
     log: AppLogger | None = None,
+    image_describer: ImageDescriber | None = None,
+    image_min_dimension_px: int = 64,
+    max_concurrent_image_descriptions: int = 4,
 ) -> None:
     log = log.child("ingest") if log is not None else get_logger("chatkb.kb.ingest")
     async with session_factory() as session:
@@ -57,6 +68,9 @@ async def run_ingestion(
                 owner_id,
                 ingestion_model,
                 log,
+                image_describer,
+                image_min_dimension_px,
+                max_concurrent_image_descriptions,
             )
         except Exception as exc:
             log.exception("ingestion failed for %s", file_id)
@@ -82,6 +96,9 @@ async def _ingest(
     owner_id: str,
     ingestion_model: str,
     log: AppLogger,
+    image_describer: ImageDescriber | None = None,
+    image_min_dimension_px: int = 64,
+    max_concurrent_image_descriptions: int = 4,
 ) -> None:
     suffix = Path(row.filename).suffix.lower()
     s3_key = f"{owner_id}/{row.id}{suffix}"
@@ -93,10 +110,23 @@ async def _ingest(
     await session.commit()
 
     log.info("extracting %s", row.filename)
-    extraction = await asyncio.to_thread(extract, file_path, row.mime_type)
+    extraction = await asyncio.to_thread(
+        extract,
+        file_path,
+        row.mime_type,
+        image_min_dimension_px=image_min_dimension_px,
+    )
     if isinstance(extraction, ProseExtraction):
-        content_md = assemble_content(extraction.blocks)
-        chunks = chunk_blocks(extraction.blocks)
+        blocks = extraction.blocks
+        if extraction.images and image_describer is not None:
+            blocks = await insert_image_descriptions(
+                blocks,
+                extraction.images,
+                image_describer,
+                max_concurrency=max_concurrent_image_descriptions,
+            )
+        content_md = assemble_content(blocks)
+        chunks = chunk_blocks(blocks)
         page_count = extraction.page_count
     else:
         content_md, chunks = await prepare_table(
@@ -106,7 +136,7 @@ async def _ingest(
             model=ingestion_model,
         )
         page_count = None
-    index_md = await generate_index(content_md, llm, ingestion_model)
+    file_summary = await generate_file_summary(content_md, llm, ingestion_model)
     embeddings = await embedder.embed([chunk.text for chunk in chunks])
     now = datetime.now(UTC)
     rows = [
@@ -127,12 +157,22 @@ async def _ingest(
         )
         for chunk, embedding in zip(chunks, embeddings, strict=True)
     ]
+    collection = await repo.get_collection_for_update(row.collection_id)
+    if collection is None:
+        raise RuntimeError("Collection not found while finalizing ingestion")
     await repo.replace_chunks(row.id, rows)
     row.content_md = content_md
-    row.index_md = index_md
+    row.summary_md = file_summary
     row.page_count = page_count
     row.status = "ready"
     row.error = None
     row.updated_at = now
+    ready_files = await repo.list_ready_files(row.collection_id)
+    collection.index_md = assemble_collection_index(
+        collection.name,
+        collection.description,
+        [(kb_file.filename, kb_file.summary_md) for kb_file in ready_files],
+    )
+    collection.updated_at = now
     await session.commit()
     log.info("ready %s (%s chunks)", row.id, len(rows))

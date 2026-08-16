@@ -41,7 +41,13 @@ class KbFileSummary(BaseModel):
 
 class KbFileResponse(KbFileSummary):
     content_md: str | None = Field(default=None, serialization_alias="contentMd")
-    index_md: str | None = Field(default=None, serialization_alias="indexMd")
+
+
+class CollectionIndexResponse(BaseModel):
+    collection_id: str = Field(serialization_alias="collectionId")
+    content: str
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class KbFileViewResponse(BaseModel):
@@ -51,3 +57,30 @@ class KbFileViewResponse(BaseModel):
     page_count: int | None = Field(default=None, serialization_alias="pageCount")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class ObservabilityQueryRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2_000)
+    limit: int = Field(default=10, ge=1, le=20)
+
+
+class ObservabilityQueryHit(BaseModel):
+    chunk_id: str = Field(serialization_alias="chunkId")
+    file_id: str = Field(serialization_alias="fileId")
+    filename: str
+    mime_type: str = Field(serialization_alias="mimeType")
+    text: str
+    section_header: str | None = Field(
+        default=None,
+        serialization_alias="sectionHeader",
+    )
+    page: int | None
+    anchor: str
+    score: float
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ObservabilityQueryResponse(BaseModel):
+    query: str
+    results: list[ObservabilityQueryHit]

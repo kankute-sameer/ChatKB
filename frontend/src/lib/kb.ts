@@ -22,9 +22,25 @@ export interface KbFile {
   error: string | null;
   pageCount: number | null;
   contentMd?: string | null;
-  indexMd?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ObservabilityQueryHit {
+  chunkId: string;
+  fileId: string;
+  filename: string;
+  mimeType: string;
+  text: string;
+  sectionHeader: string | null;
+  page: number | null;
+  anchor: string;
+  score: number;
+}
+
+export interface ObservabilityQueryResponse {
+  query: string;
+  results: ObservabilityQueryHit[];
 }
 
 export const COLLECTIONS_CHANGED = "chatkb:collections-changed";
@@ -39,6 +55,14 @@ export function listCollections(): Promise<Collection[]> {
 
 export function getCollection(id: string): Promise<Collection> {
   return api<Collection>(`/v1/collections/${id}`);
+}
+
+export function getCollectionIndex(
+  id: string,
+): Promise<{ collectionId: string; content: string }> {
+  return api<{ collectionId: string; content: string }>(
+    `/v1/collections/${id}/index`,
+  );
 }
 
 export function createCollection(body: {
@@ -86,6 +110,20 @@ export function deleteFile(
   return api<void>(`/v1/collections/${collectionId}/files/${fileId}`, {
     method: "DELETE",
   });
+}
+
+export function queryCollection(
+  collectionId: string,
+  query: string,
+  limit = 10,
+): Promise<ObservabilityQueryResponse> {
+  return api<ObservabilityQueryResponse>(
+    `/v1/observability/collections/${collectionId}/query`,
+    {
+      method: "POST",
+      body: JSON.stringify({ query, limit }),
+    },
+  );
 }
 
 export function formatBytes(n: number): string {

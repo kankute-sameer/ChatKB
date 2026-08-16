@@ -1,6 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { BookOpen, LogOut, PanelLeft, Plus, Search, User } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  LogOut,
+  PanelLeft,
+  Plus,
+  Search,
+  User,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -98,6 +106,15 @@ export function Sidebar() {
             </NavLink>
           );
         })}
+        {username === "alice" ? (
+          <NavLink
+            to="/observability"
+            className={({ isActive }) => rowLinkClass(isActive, collapsed)}
+          >
+            <Activity className="size-icon shrink-0" strokeWidth={1.75} />
+            {collapsed ? null : <RowLabel>Observability</RowLabel>}
+          </NavLink>
+        ) : null}
       </nav>
 
       {collapsed ? null : (

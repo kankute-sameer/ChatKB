@@ -94,7 +94,7 @@ def test_router_dispatches_pdf_and_docx(
     }
     monkeypatch.setattr(
         "app.features.kb.ingestion.extract.extract_pdf",
-        lambda _path: ([pdf_block], 1),
+        lambda _path, **_kwargs: ([pdf_block], 1, []),
     )
     monkeypatch.setattr(
         "app.features.kb.ingestion.extract.extract_docx",
@@ -277,4 +277,6 @@ async def test_csv_pipeline_stores_resource_and_only_two_chunks(
     assert chunks[1].chunk_metadata == {"row_start": 1, "row_end": 2}
     assert kb_file.s3_key == f"alice/{kb_file.id}.csv"
     assert kb_file.content_md is not None
-    assert kb_file.index_md == "A short index summary."
+    assert kb_file.summary_md == "A short index summary."
+    assert collection.index_md is not None
+    assert f"### {path.name}" in collection.index_md

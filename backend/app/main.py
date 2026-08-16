@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm = llm
     app.state.exa = exa
     app.state.embedder = embedder
+    app.state.image_describer = llm
     app.state.storage = storage
     app.state.tools = tools
     app.state.log = log

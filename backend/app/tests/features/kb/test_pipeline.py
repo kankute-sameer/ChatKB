@@ -3,10 +3,11 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
+from PIL import Image
 from sqlalchemy import select
 
 from app.core.ids import new_id
-from app.features.kb.ingestion.extract import Block, ProseExtraction
+from app.features.kb.ingestion.extract import Block, ExtractedImage, ProseExtraction
 from app.features.kb.ingestion.pipeline import run_ingestion
 from app.features.kb.models import Collection, KbChunk, KbFile
 from app.tests.fakes import FakeEmbedder, FakeLLM, FakeStorage
@@ -70,7 +71,11 @@ async def test_pipeline_extract_failure_marks_file_failed(
     pdf_path = tmp_path / "spec.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
 
-    def boom(_path: Path, _mime_type: str) -> ProseExtraction:
+    def boom(
+        _path: Path,
+        _mime_type: str,
+        **_kwargs: object,
+    ) -> ProseExtraction:
         raise RuntimeError("docling exploded")
 
     monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract", boom)
@@ -107,7 +112,11 @@ async def test_pipeline_persists_chunks_and_marks_ready(
     embedder = FakeEmbedder()
     storage = FakeStorage()
 
-    def fake_extract(_path: Path, _mime_type: str) -> ProseExtraction:
+    def fake_extract(
+        _path: Path,
+        _mime_type: str,
+        **_kwargs: object,
+    ) -> ProseExtraction:
         return ProseExtraction(
             "prose",
             [
@@ -115,6 +124,15 @@ async def test_pipeline_persists_chunks_and_marks_ready(
                 _block("Hello world.", anchor="p1-2"),
             ],
             1,
+            [
+                ExtractedImage(
+                    image=Image.new("RGB", (200, 100)),
+                    insert_at=1,
+                    page=1,
+                    anchor="p1-image",
+                    bbox=[0.2, 0.3, 0.8, 0.7],
+                )
+            ],
         )
 
     monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract", fake_extract)
@@ -128,6 +146,7 @@ async def test_pipeline_persists_chunks_and_marks_ready(
         storage=storage,
         owner_id="alice",
         ingestion_model="test-model",
+        image_describer=fake_llm,
     )
 
     async with app.state.session_factory() as session:
@@ -139,20 +158,33 @@ async def test_pipeline_persists_chunks_and_marks_ready(
         assert row.page_count == 1
         assert row.content_md is not None
         assert "## Intro" in row.content_md
-        assert row.index_md == fake_llm.title
+        assert "*[Image: A test image.]*" in row.content_md
+        assert row.summary_md == fake_llm.title
+        collection = await session.get(Collection, collection_id)
+        assert collection is not None
+        assert collection.index_md is not None
+        assert "### spec.pdf" in collection.index_md
+        assert fake_llm.title in collection.index_md
         result = await session.execute(
             select(KbChunk)
             .where(KbChunk.file_id == file_id)
             .order_by(KbChunk.chunk_index)
         )
         chunks = list(result.scalars().all())
-        assert len(chunks) == 1
+        assert len(chunks) == 2
         assert chunks[0].collection_id == collection_id
-        assert chunks[0].text == "Intro\n\nHello world."
+        assert chunks[0].text == "Intro\n\nA test image."
+        assert chunks[0].block_type == "image"
+        assert chunks[0].bbox == [0.2, 0.3, 0.8, 0.7]
+        assert chunks[1].text == "Intro\n\nHello world."
         assert chunks[0].section_header == "Intro"
-        assert chunks[0].anchor == "p1-2"
+        assert chunks[0].anchor == "p1-image"
+        assert chunks[1].anchor == "p1-2"
         assert len(chunks[0].embedding) == 1536
-    assert embedder.texts == ["Intro\n\nHello world."]
+    assert embedder.texts == [
+        "Intro\n\nA test image.",
+        "Intro\n\nHello world.",
+    ]
     assert storage.puts == [
         (f"alice/{file_id}.pdf", b"%PDF-1.4", "application/pdf")
     ]

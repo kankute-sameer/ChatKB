@@ -16,15 +16,21 @@ from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage
 from app.features.kb.db import KbRepository
+from app.features.kb.ingestion.assemble import assemble_collection_index
+from app.features.kb.ingestion.describe_image import ImageDescriber
 from app.features.kb.ingestion.embed import Embedder
 from app.features.kb.ingestion.pipeline import run_ingestion
 from app.features.kb.models import Collection, KbFile
+from app.features.kb.retrieve import hybrid_search
 from app.features.kb.schemas import (
     CollectionCreateRequest,
+    CollectionIndexResponse,
     CollectionResponse,
     KbFileResponse,
     KbFileSummary,
     KbFileViewResponse,
+    ObservabilityQueryHit,
+    ObservabilityQueryResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,6 +71,7 @@ class KbService:
         session_factory: async_sessionmaker[AsyncSession],
         llm: LLM,
         embedder: Embedder,
+        image_describer: ImageDescriber,
         storage: Storage,
         settings: Settings | None = None,
         log: AppLogger | None = None,
@@ -73,6 +80,7 @@ class KbService:
         self.session_factory = session_factory
         self.llm = llm
         self.embedder = embedder
+        self.image_describer = image_describer
         self.storage = storage
         self.settings = settings or get_settings()
         self.log = log if log is not None else get_logger("chatkb.kb")
@@ -88,6 +96,11 @@ class KbService:
             name=body.name.strip(),
             description=body.description.strip(),
             visibility=body.visibility,
+            index_md=assemble_collection_index(
+                body.name,
+                body.description,
+                [],
+            ),
             created_at=now,
             updated_at=now,
         )
@@ -105,6 +118,22 @@ class KbService:
     ) -> CollectionResponse:
         collection = await self._owned_collection(collection_id, owner_id)
         return CollectionResponse.model_validate(collection)
+
+    async def get_collection_index(
+        self,
+        owner_id: str,
+        collection_id: str,
+    ) -> CollectionIndexResponse:
+        collection = await self._owned_collection(collection_id, owner_id)
+        return CollectionIndexResponse(
+            collection_id=collection.id,
+            content=collection.index_md
+            or assemble_collection_index(
+                collection.name,
+                collection.description,
+                [],
+            ),
+        )
 
     async def delete_collection(self, owner_id: str, collection_id: str) -> None:
         collection = await self._owned_collection(collection_id, owner_id)
@@ -159,6 +188,11 @@ class KbService:
                 owner_id=owner_id,
                 ingestion_model=self.settings.ingestion_model,
                 log=self.log,
+                image_describer=self.image_describer,
+                image_min_dimension_px=self.settings.image_min_dimension_px,
+                max_concurrent_image_descriptions=(
+                    self.settings.max_concurrent_image_descriptions
+                ),
             ),
             name=f"ingest:{kb_file.id}",
         )
@@ -184,10 +218,61 @@ class KbService:
             )
         return KbFileResponse.model_validate(kb_file)
 
+    async def query_collection_for_observability(
+        self,
+        owner_id: str,
+        collection_id: str,
+        query: str,
+        limit: int,
+    ) -> ObservabilityQueryResponse:
+        if owner_id != "alice":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Observability is only available to Alice",
+            )
+        await self._owned_collection(collection_id, owner_id)
+        normalized_query = query.strip()
+        if not normalized_query:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Query cannot be empty",
+            )
+        hits = await hybrid_search(
+            normalized_query,
+            [collection_id],
+            db=self.session,
+            embedder=self.embedder,
+            k=limit,
+            session_factory=self.session_factory,
+        )
+        return ObservabilityQueryResponse(
+            query=normalized_query,
+            results=[
+                ObservabilityQueryHit(
+                    chunk_id=hit.chunk_id,
+                    file_id=hit.file_id,
+                    filename=hit.filename,
+                    mime_type=hit.mime_type,
+                    text=hit.text,
+                    section_header=hit.section_header,
+                    page=hit.page,
+                    anchor=hit.anchor,
+                    score=hit.score,
+                )
+                for hit in hits
+            ],
+        )
+
     async def delete_file(
         self, owner_id: str, collection_id: str, file_id: str
     ) -> None:
         await self._owned_collection(collection_id, owner_id)
+        collection = await self.repo.get_collection_for_update(collection_id)
+        if collection is None or collection.owner_id != owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Collection not found",
+            )
         kb_file = await self.repo.get_file_in_collection(file_id, collection_id)
         if kb_file is None:
             raise HTTPException(
@@ -196,6 +281,13 @@ class KbService:
         if kb_file.s3_key:
             await self.storage.delete(kb_file.s3_key)
         await self.repo.delete_file(kb_file)
+        ready_files = await self.repo.list_ready_files(collection_id)
+        collection.index_md = assemble_collection_index(
+            collection.name,
+            collection.description,
+            [(row.filename, row.summary_md) for row in ready_files],
+        )
+        collection.updated_at = datetime.now(UTC)
         await self.session.commit()
 
     async def content_url(self, owner_id: str, file_id: str) -> str:

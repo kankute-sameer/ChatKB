@@ -1,6 +1,8 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
+from PIL import Image
+
 from app.core.llm.types import ChatMessage, StreamEvent
 from app.features.kb.ingestion.embed import DOCUMENT_TASK_TYPE
 from app.features.kb.models import EMBEDDING_DIMENSIONS
@@ -12,6 +14,7 @@ class FakeLLM:
         chunks: Sequence[str] | None = None,
         title: str = "Test title",
         rounds: Sequence[Sequence[StreamEvent]] | None = None,
+        image_description: str = "A test image.",
     ) -> None:
         import asyncio
 
@@ -21,6 +24,8 @@ class FakeLLM:
             [list(round_events) for round_events in rounds] if rounds else None
         )
         self.round_index = 0
+        self.image_description = image_description
+        self.images: list[Image.Image] = []
         self.calls: list[list[ChatMessage]] = []
         self.tools_seen: list[Sequence[dict[str, Any]] | None] = []
         self.started = asyncio.Event()
@@ -62,6 +67,10 @@ class FakeLLM:
     ) -> str:
         del messages, model
         return self.title
+
+    async def describe_image(self, image: Image.Image) -> str:
+        self.images.append(image)
+        return self.image_description
 
 
 class FakeEmbedder:

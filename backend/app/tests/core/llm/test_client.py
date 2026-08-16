@@ -1,3 +1,10 @@
+import json
+from typing import Any
+
+import httpx
+import pytest
+from PIL import Image
+
 from app.core.llm.client import LLMClient, _ResponsesMapper
 
 
@@ -35,6 +42,73 @@ def test_reasoning_off_omits_field() -> None:
     )
     body = client._body([], model="gpt-5-mini", stream=True, with_reasoning=True)
     assert "reasoning" not in body
+
+
+@pytest.mark.asyncio
+async def test_describe_image_uses_openai_responses_multimodal_input() -> None:
+    requests: list[Any] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "A lighthouse with green bands.",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    http = httpx.AsyncClient(
+        base_url="https://example.test/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    client = LLMClient(
+        api_key="k",
+        base_url="https://example.test/v1",
+        model="gpt-5-mini",
+        title_model="gpt-4.1-mini",
+        vision_model="gpt-4.1-mini",
+        http=http,
+    )
+
+    description = await client.describe_image(Image.new("RGB", (100, 80), "green"))
+    await http.aclose()
+
+    assert description == "A lighthouse with green bands."
+    assert requests[0]["model"] == "gpt-4.1-mini"
+    content = requests[0]["input"][0]["content"]
+    assert content[0]["type"] == "input_text"
+    assert content[1]["type"] == "input_image"
+    assert content[1]["image_url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_describe_image_failure_returns_empty_string() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="provider failed")
+
+    http = httpx.AsyncClient(
+        base_url="https://example.test/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    client = LLMClient(
+        api_key="k",
+        base_url="https://example.test/v1",
+        model="gpt-5-mini",
+        title_model="gpt-4.1-mini",
+        http=http,
+    )
+    assert await client.describe_image(Image.new("RGB", (100, 80))) == ""
+    await http.aclose()
 
 
 def test_mapper_streams_reasoning_then_text() -> None:

@@ -19,6 +19,17 @@ class KbRepository:
     async def get_collection(self, collection_id: str) -> Collection | None:
         return await self.session.get(Collection, collection_id)
 
+    async def get_collection_for_update(
+        self,
+        collection_id: str,
+    ) -> Collection | None:
+        result = await self.session.execute(
+            select(Collection)
+            .where(Collection.id == collection_id)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def get_owned_collection(
         self, collection_id: str, owner_id: str
     ) -> Collection | None:
@@ -65,6 +76,17 @@ class KbRepository:
             select(KbFile)
             .where(KbFile.collection_id == collection_id)
             .order_by(KbFile.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def list_ready_files(self, collection_id: str) -> list[KbFile]:
+        result = await self.session.execute(
+            select(KbFile)
+            .where(
+                KbFile.collection_id == collection_id,
+                KbFile.status == "ready",
+            )
+            .order_by(KbFile.filename.asc(), KbFile.created_at.asc())
         )
         return list(result.scalars().all())
 
