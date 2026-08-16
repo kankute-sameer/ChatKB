@@ -14,6 +14,16 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
+/** Directory URL for OpenJPEG / QCMS wasm (needed for JPEG 2000 figures in many textbooks). */
+const PDF_WASM_URL = new URL(
+  "pdfjs-dist/wasm/openjpeg.wasm",
+  import.meta.url,
+)
+  .toString()
+  .replace(/[^/]+$/, "");
+
+const PDF_OPTIONS = { wasmUrl: PDF_WASM_URL };
+
 export type NormalizedBbox = [number, number, number, number];
 
 export interface DocumentViewerProps {
@@ -141,6 +151,7 @@ export function DocumentViewer({
         <div className="mx-auto flex w-fit flex-col gap-6">
           <Document
             file={file}
+            options={PDF_OPTIONS}
             loading={
               <div className="flex h-96 w-[40rem] items-center justify-center bg-white text-sm text-gray-500">
                 Loading PDF…

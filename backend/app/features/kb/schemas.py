@@ -59,6 +59,12 @@ class KbFileViewResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class CollectionAgentAttachRequest(BaseModel):
+    agent_id: str = Field(alias="agentId", min_length=1)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class ObservabilityQueryRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2_000)
     limit: int = Field(default=10, ge=1, le=20)

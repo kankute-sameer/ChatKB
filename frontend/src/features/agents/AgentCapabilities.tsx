@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { FileText, Globe, Plus } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { FileText, Globe, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import type { Collection } from "@/lib/kb";
 import { cn } from "@/lib/utils";
 
@@ -119,76 +120,128 @@ export function AgentCapabilitiesOverview({
 export function KnowledgeBasePickerDialog({
   open,
   collections,
-  selectedIds,
-  saving,
+  attachedIds,
+  connectingId,
   error,
   onOpenChange,
-  onToggle,
-  onSave,
+  onConnect,
+  onRemove,
 }: {
   open: boolean;
   collections: Collection[];
-  selectedIds: string[];
-  saving: boolean;
+  attachedIds: string[];
+  connectingId: string | null;
   error: string | null;
   onOpenChange: (open: boolean) => void;
-  onToggle: (collectionId: string) => void;
-  onSave: () => void;
+  onConnect: (collectionId: string) => void;
+  onRemove: (collectionId: string) => void;
 }) {
-  const selected = new Set(selectedIds);
+  const [query, setQuery] = useState("");
+  const attached = new Set(attachedIds);
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return collections.filter((collection) => {
+      if (!needle) return true;
+      return (
+        collection.name.toLowerCase().includes(needle) ||
+        collection.description.toLowerCase().includes(needle)
+      );
+    });
+  }, [collections, query]);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setQuery("");
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="w-[min(780px,calc(100vw-4rem))] max-w-none rounded-lg px-8 py-10">
         <DialogHeader>
-          <DialogTitle>Attach knowledge bases</DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            Choose which collections this agent can search.
+          <DialogTitle className="text-title font-normal">
+            Add knowledge base
+          </DialogTitle>
+          <p className="mt-2 font-sans text-nav font-ui text-ink-muted">
+            Choose which knowledge bases your agent can retrieve from.
           </p>
         </DialogHeader>
 
-        <div className="my-5 max-h-72 overflow-y-auto rounded border border-border">
-          {collections.length ? (
-            collections.map((collection) => (
-              <label
-                key={collection.id}
-                className="flex cursor-pointer items-start gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-gray-50"
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(collection.id)}
-                  onChange={() => onToggle(collection.id)}
-                  className="mt-1 size-4 accent-foreground"
-                />
-                <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-ink">
-                    {collection.name}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {collection.description || "No description"}
-                  </span>
-                </span>
-              </label>
-            ))
+        <div className="relative mt-8">
+          <Search
+            aria-hidden
+            className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-ink-placeholder"
+          />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search"
+            className="rounded-full pl-12 focus-visible:ring-gray-300"
+          />
+        </div>
+
+        <div className="mt-4 min-h-72 max-h-[28rem] overflow-y-auto rounded-xl border border-border">
+          {visible.length ? (
+            visible.map((collection) => {
+              const isAttached = attached.has(collection.id);
+              const busy = connectingId === collection.id;
+              return (
+                <div
+                  key={collection.id}
+                  className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                >
+                  <FileText className="size-5 shrink-0 text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-sans text-nav font-ui font-medium text-ink">
+                      {collection.name}
+                    </p>
+                    <p className="truncate font-sans text-nav font-ui text-ink-muted">
+                      {collection.description || collection.name}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="pill"
+                    className="shrink-0"
+                    disabled={busy}
+                    onClick={() =>
+                      isAttached
+                        ? onRemove(collection.id)
+                        : onConnect(collection.id)
+                    }
+                  >
+                    {busy
+                      ? isAttached
+                        ? "Removing…"
+                        : "Connecting…"
+                      : isAttached
+                        ? "Remove"
+                        : "Connect"}
+                  </Button>
+                </div>
+              );
+            })
           ) : (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              No knowledge bases yet. Create one from Knowledge Bases first.
+            <p className="px-4 py-8 text-center font-sans text-nav font-ui text-ink-muted">
+              {collections.length === 0
+                ? "No knowledge bases yet. Create one from Knowledge Bases first."
+                : "No knowledge bases match your search."}
             </p>
           )}
         </div>
 
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <div className="flex justify-end gap-2">
+        {error ? (
+          <p className="mt-3 font-sans text-nav font-ui text-destructive">{error}</p>
+        ) : null}
+        <div className="mt-5 flex justify-end">
           <Button
             type="button"
-            variant="ghost"
+            className="rounded-full bg-gray-900 px-6 text-white hover:bg-gray-800"
             onClick={() => onOpenChange(false)}
-            disabled={saving}
+            disabled={connectingId != null}
           >
-            Cancel
-          </Button>
-          <Button type="button" onClick={onSave} disabled={saving}>
-            {saving ? "Saving…" : "Save attachments"}
+            Done
           </Button>
         </div>
       </DialogContent>
@@ -218,7 +271,7 @@ export function WebSearchConnectorDetail({
           <Globe className="mt-0.5 size-5 shrink-0 text-ink" />
           <div>
             <p className="font-sans text-nav font-medium text-ink">Web Search</p>
-            <p className="mt-0.5 font-sans text-sm font-ui text-muted-foreground">
+            <p className="mt-0.5 font-sans text-nav font-ui text-ink-muted">
               Connected
             </p>
           </div>

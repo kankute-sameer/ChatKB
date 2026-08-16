@@ -448,3 +448,58 @@ async def test_delete_collection_removes_all_s3_objects(
     storage = app.state.storage
     assert isinstance(storage, FakeStorage)
     assert storage.deletes == [s3_key]
+
+
+@pytest.mark.asyncio
+async def test_collection_agents_attach_list_and_detach(
+    client: AsyncClient,
+) -> None:
+    token = await _token(client)
+    collection = await _create_collection(client, token)
+    agent = await client.post(
+        "/v1/agents",
+        headers=_headers(token),
+        json={"name": "Research agent", "description": "Searches docs"},
+    )
+    assert agent.status_code == 200
+    agent_id = str(agent.json()["id"])
+
+    empty = await client.get(
+        f"/v1/collections/{collection['id']}/agents",
+        headers=_headers(token),
+    )
+    assert empty.status_code == 200
+    assert empty.json() == []
+
+    attached = await client.post(
+        f"/v1/collections/{collection['id']}/agents",
+        headers=_headers(token),
+        json={"agentId": agent_id},
+    )
+    assert attached.status_code == 200
+    assert attached.json()["id"] == agent_id
+
+    listed = await client.get(
+        f"/v1/collections/{collection['id']}/agents",
+        headers=_headers(token),
+    )
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()] == [agent_id]
+
+    from_agent = await client.get(
+        f"/v1/agents/{agent_id}/collections",
+        headers=_headers(token),
+    )
+    assert [row["id"] for row in from_agent.json()] == [collection["id"]]
+
+    detached = await client.delete(
+        f"/v1/collections/{collection['id']}/agents/{agent_id}",
+        headers=_headers(token),
+    )
+    assert detached.status_code == 204
+    listed_again = await client.get(
+        f"/v1/collections/{collection['id']}/agents",
+        headers=_headers(token),
+    )
+    assert listed_again.json() == []
+

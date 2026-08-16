@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-5.6-luna"
     llm_title_model: str = "gpt-5.6-luna"
-    llm_vision_model: str = "gpt-4.1-mini"
+    llm_vision_model: str = "gpt-5.6-luna"
     llm_reasoning_effort: str = "medium"
     llm_reasoning_summary: str = "auto"
     stream_buffer_ttl_seconds: int = 300

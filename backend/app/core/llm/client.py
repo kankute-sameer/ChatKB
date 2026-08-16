@@ -28,7 +28,7 @@ class LLMClient:
         base_url: str,
         model: str,
         title_model: str,
-        vision_model: str = "gpt-4.1-mini",
+        vision_model: str = "gpt-5.6-luna",
         reasoning_effort: str = "medium",
         reasoning_summary: str = "auto",
         http: httpx.AsyncClient | None = None,

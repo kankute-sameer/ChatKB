@@ -513,6 +513,8 @@ async def test_build_session_runs_builder_tools_against_target(
         "get_agent_setup",
         "update_agent_instructions",
         "update_agent_metadata",
+        "list_knowledge_bases",
+        "attach_knowledge_bases",
     }
     system = str(fake_llm.calls[0][0].get("content") or "")
     assert "# Agent Creator" in system
@@ -520,6 +522,115 @@ async def test_build_session_runs_builder_tools_against_target(
 
     loaded = await client.get(f"/v1/agents/{agent_id}", headers=_headers(token))
     assert loaded.json()["instructions"] == "You research primary sources first."
+
+
+@pytest.mark.asyncio
+async def test_build_session_can_attach_relevant_knowledge_bases(
+    client: AsyncClient, fake_llm: FakeLLM
+) -> None:
+    token = await _token(client)
+    agent = await _create_agent(client, token, name="Resume screener")
+    agent_id = str(agent["id"])
+
+    resumes = await client.post(
+        "/v1/collections",
+        headers=_headers(token),
+        json={
+            "name": "Candidate resumes",
+            "description": "PDF resumes for hiring",
+        },
+    )
+    assert resumes.status_code == 200
+    resumes_id = str(resumes.json()["id"])
+
+    recipes = await client.post(
+        "/v1/collections",
+        headers=_headers(token),
+        json={
+            "name": "Kitchen recipes",
+            "description": "Cooking notes",
+        },
+    )
+    assert recipes.status_code == 200
+
+    session = await client.post(
+        "/v1/build-sessions",
+        headers=_headers(token),
+        json={"targetAgentId": agent_id},
+    )
+    assert session.status_code == 200
+    conversation_id = str(session.json()["conversation"]["id"])
+
+    fake_llm.rounds = [
+        [
+            StreamEvent(
+                type="tool-input-start",
+                toolCallId="call_list",
+                toolName="list_knowledge_bases",
+                providerExecuted=True,
+            ),
+            StreamEvent(
+                type="tool-input-available",
+                toolCallId="call_list",
+                toolName="list_knowledge_bases",
+                input={},
+                providerExecuted=True,
+            ),
+        ],
+        [
+            StreamEvent(
+                type="tool-input-start",
+                toolCallId="call_attach",
+                toolName="attach_knowledge_bases",
+                providerExecuted=True,
+            ),
+            StreamEvent(
+                type="tool-input-available",
+                toolCallId="call_attach",
+                toolName="attach_knowledge_bases",
+                input={"collection_ids": [resumes_id]},
+                providerExecuted=True,
+            ),
+        ],
+        [
+            StreamEvent(type="text-start", id="text_kb"),
+            StreamEvent(
+                type="text-delta",
+                id="text_kb",
+                delta="Attached Candidate resumes. Remove it if you do not want it.",
+            ),
+            StreamEvent(type="text-end", id="text_kb"),
+        ],
+    ]
+
+    response = await client.post(
+        "/v1/responses",
+        headers=_headers(token),
+        json={
+            "id": conversation_id,
+            "message": {
+                "id": "msg_user_kb",
+                "role": "user",
+                "parts": [
+                    {
+                        "type": "text",
+                        "text": "Screen candidates using our resume library",
+                        "state": "done",
+                    }
+                ],
+            },
+            "stream": True,
+            "trigger": "submit-message",
+        },
+    )
+    assert response.status_code == 200
+
+    attached = await client.get(
+        f"/v1/agents/{agent_id}/collections",
+        headers=_headers(token),
+    )
+    assert attached.status_code == 200
+    assert [row["id"] for row in attached.json()] == [resumes_id]
 
 
 def test_build_system_prompt_concatenates_base_and_instructions() -> None:

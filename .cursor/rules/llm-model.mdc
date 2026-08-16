@@ -1,0 +1,7 @@
+# Default LLM model
+
+Prefer **`gpt-5.6-luna`** for chat, titles, vision/image description, and ingestion.
+
+Do **not** default to `gpt-4.1-mini` (or similar “mini” OpenAI models) for cost reasons — they can be more expensive than `gpt-5.6-luna` in this stack.
+
+When adding or changing model settings (`LLM_MODEL`, `LLM_TITLE_MODEL`, `LLM_VISION_MODEL`, `INGESTION_MODEL`, code defaults, `.env.example`, tests), use `gpt-5.6-luna` unless the user explicitly asks for a different model.

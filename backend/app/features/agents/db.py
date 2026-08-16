@@ -32,6 +32,23 @@ class AgentRepository:
         )
         return list(result.scalars().all())
 
+    async def list_owned_by_ids(
+        self,
+        owner_id: str,
+        ids: list[str],
+    ) -> list[Agent]:
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(Agent).where(
+                Agent.owner_id == owner_id,
+                Agent.is_builder.is_(False),
+                Agent.id.in_(ids),
+            )
+        )
+        by_id = {row.id: row for row in result.scalars().all()}
+        return [by_id[agent_id] for agent_id in ids if agent_id in by_id]
+
     async def delete(self, agent: Agent) -> None:
         await self.session.delete(agent)
         await self.session.flush()

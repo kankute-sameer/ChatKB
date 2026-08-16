@@ -12,12 +12,12 @@ def test_stream_body_includes_reasoning() -> None:
     client = LLMClient(
         api_key="k",
         base_url="https://example.test/v1",
-        model="gpt-5-mini",
-        title_model="gpt-4.1-mini",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
         reasoning_effort="medium",
         reasoning_summary="auto",
     )
-    body = client._body([], model="gpt-5-mini", stream=True, with_reasoning=True)
+    body = client._body([], model="gpt-5.6-luna", stream=True, with_reasoning=True)
     assert body["reasoning"] == {"effort": "medium", "summary": "auto"}
 
 
@@ -25,10 +25,10 @@ def test_complete_body_omits_reasoning() -> None:
     client = LLMClient(
         api_key="k",
         base_url="https://example.test/v1",
-        model="gpt-5-mini",
-        title_model="gpt-4.1-mini",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
     )
-    body = client._body([], model="gpt-4.1-mini", stream=False)
+    body = client._body([], model="gpt-5.6-luna", stream=False)
     assert "reasoning" not in body
 
 
@@ -36,11 +36,11 @@ def test_reasoning_off_omits_field() -> None:
     client = LLMClient(
         api_key="k",
         base_url="https://example.test/v1",
-        model="gpt-5-mini",
-        title_model="gpt-4.1-mini",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
         reasoning_effort="off",
     )
-    body = client._body([], model="gpt-5-mini", stream=True, with_reasoning=True)
+    body = client._body([], model="gpt-5.6-luna", stream=True, with_reasoning=True)
     assert "reasoning" not in body
 
 
@@ -74,9 +74,9 @@ async def test_describe_image_uses_openai_responses_multimodal_input() -> None:
     client = LLMClient(
         api_key="k",
         base_url="https://example.test/v1",
-        model="gpt-5-mini",
-        title_model="gpt-4.1-mini",
-        vision_model="gpt-4.1-mini",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
+        vision_model="gpt-5.6-luna",
         http=http,
     )
 
@@ -84,7 +84,7 @@ async def test_describe_image_uses_openai_responses_multimodal_input() -> None:
     await http.aclose()
 
     assert description == "A lighthouse with green bands."
-    assert requests[0]["model"] == "gpt-4.1-mini"
+    assert requests[0]["model"] == "gpt-5.6-luna"
     content = requests[0]["input"][0]["content"]
     assert content[0]["type"] == "input_text"
     assert content[1]["type"] == "input_image"
@@ -103,8 +103,8 @@ async def test_describe_image_failure_returns_empty_string() -> None:
     client = LLMClient(
         api_key="k",
         base_url="https://example.test/v1",
-        model="gpt-5-mini",
-        title_model="gpt-4.1-mini",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
         http=http,
     )
     assert await client.describe_image(Image.new("RGB", (100, 80))) == ""
@@ -201,7 +201,7 @@ def test_mapper_emits_usage_and_finish_metadata() -> None:
         {
             "type": "response.completed",
             "response": {
-                "model": "gpt-5-mini",
+                "model": "gpt-5.6-luna",
                 "status": "completed",
                 "usage": {
                     "input_tokens": 120,
@@ -215,7 +215,7 @@ def test_mapper_emits_usage_and_finish_metadata() -> None:
     assert events == [
         {
             "type": "response-metadata",
-            "model": "gpt-5-mini",
+            "model": "gpt-5.6-luna",
             "finishReason": "completed",
             "usage": {
                 "input_tokens": 120,

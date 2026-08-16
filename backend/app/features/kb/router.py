@@ -10,9 +10,11 @@ from app.core.deps import get_current_user, require_alice
 from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage, get_storage
+from app.features.agents.schemas import AgentResponse
 from app.features.kb.ingestion.describe_image import ImageDescriber
 from app.features.kb.ingestion.embed import Embedder
 from app.features.kb.schemas import (
+    CollectionAgentAttachRequest,
     CollectionCreateRequest,
     CollectionIndexResponse,
     CollectionResponse,
@@ -110,6 +112,45 @@ async def get_collection_index(
     service: Annotated[KbService, Depends(get_service)],
 ) -> CollectionIndexResponse:
     return await service.get_collection_index(owner_id, collection_id)
+
+
+@router.get(
+    "/v1/collections/{collection_id}/agents",
+    response_model=list[AgentResponse],
+)
+async def list_collection_agents(
+    collection_id: str,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[KbService, Depends(get_service)],
+) -> list[AgentResponse]:
+    return await service.list_agents(owner_id, collection_id)
+
+
+@router.post(
+    "/v1/collections/{collection_id}/agents",
+    response_model=AgentResponse,
+)
+async def attach_collection_agent(
+    collection_id: str,
+    body: CollectionAgentAttachRequest,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[KbService, Depends(get_service)],
+) -> AgentResponse:
+    return await service.attach_agent(owner_id, collection_id, body.agent_id)
+
+
+@router.delete(
+    "/v1/collections/{collection_id}/agents/{agent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def detach_collection_agent(
+    collection_id: str,
+    agent_id: str,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[KbService, Depends(get_service)],
+) -> Response:
+    await service.detach_agent(owner_id, collection_id, agent_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete(

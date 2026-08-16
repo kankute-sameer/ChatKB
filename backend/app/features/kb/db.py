@@ -111,6 +111,47 @@ class KbRepository:
         )
         return list(result.scalars().all())
 
+    async def get_collection_agent_ids(self, collection_id: str) -> list[str]:
+        result = await self.session.execute(
+            select(AgentCollection.agent_id)
+            .where(AgentCollection.collection_id == collection_id)
+            .order_by(AgentCollection.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def attach_agent_collection(
+        self,
+        agent_id: str,
+        collection_id: str,
+    ) -> None:
+        existing = await self.session.get(
+            AgentCollection,
+            {"agent_id": agent_id, "collection_id": collection_id},
+        )
+        if existing is not None:
+            return
+        self.session.add(
+            AgentCollection(
+                agent_id=agent_id,
+                collection_id=collection_id,
+                created_at=datetime.now(UTC),
+            )
+        )
+        await self.session.flush()
+
+    async def detach_agent_collection(
+        self,
+        agent_id: str,
+        collection_id: str,
+    ) -> None:
+        await self.session.execute(
+            delete(AgentCollection).where(
+                AgentCollection.agent_id == agent_id,
+                AgentCollection.collection_id == collection_id,
+            )
+        )
+        await self.session.flush()
+
     async def set_agent_collections(self, agent_id: str, ids: list[str]) -> None:
         await self.session.execute(
             delete(AgentCollection).where(AgentCollection.agent_id == agent_id)

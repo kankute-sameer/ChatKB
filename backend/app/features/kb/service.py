@@ -15,6 +15,8 @@ from app.core.ids import new_id
 from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage
+from app.features.agents.db import AgentRepository
+from app.features.agents.schemas import AgentResponse
 from app.features.kb.db import KbRepository
 from app.features.kb.ingestion.assemble import assemble_collection_index
 from app.features.kb.ingestion.describe_image import ImageDescriber
@@ -134,6 +136,53 @@ class KbService:
                 [],
             ),
         )
+
+    async def list_agents(
+        self,
+        owner_id: str,
+        collection_id: str,
+    ) -> list[AgentResponse]:
+        await self._owned_collection(collection_id, owner_id)
+        agent_ids = await self.repo.get_collection_agent_ids(collection_id)
+        rows = await AgentRepository(self.session).list_owned_by_ids(
+            owner_id,
+            agent_ids,
+        )
+        return [AgentResponse.model_validate(row) for row in rows]
+
+    async def attach_agent(
+        self,
+        owner_id: str,
+        collection_id: str,
+        agent_id: str,
+    ) -> AgentResponse:
+        await self._owned_collection(collection_id, owner_id)
+        agent = await AgentRepository(self.session).get_owned(agent_id, owner_id)
+        if agent is None or agent.is_builder:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found",
+            )
+        await self.repo.attach_agent_collection(agent.id, collection_id)
+        await self.session.commit()
+        await self.session.refresh(agent)
+        return AgentResponse.model_validate(agent)
+
+    async def detach_agent(
+        self,
+        owner_id: str,
+        collection_id: str,
+        agent_id: str,
+    ) -> None:
+        await self._owned_collection(collection_id, owner_id)
+        agent = await AgentRepository(self.session).get_owned(agent_id, owner_id)
+        if agent is None or agent.is_builder:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Agent not found",
+            )
+        await self.repo.detach_agent_collection(agent.id, collection_id)
+        await self.session.commit()
 
     async def delete_collection(self, owner_id: str, collection_id: str) -> None:
         collection = await self._owned_collection(collection_id, owner_id)

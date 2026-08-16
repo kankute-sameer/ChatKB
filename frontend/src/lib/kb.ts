@@ -1,7 +1,9 @@
 import { api } from "@/lib/api";
+import type { Agent } from "@/lib/agents";
 
 export type Visibility = "personal" | "workspace";
 export type FileStatus = "processing" | "ready" | "failed";
+export type { Agent };
 
 export interface Collection {
   id: string;
@@ -63,6 +65,29 @@ export function getCollectionIndex(
   return api<{ collectionId: string; content: string }>(
     `/v1/collections/${id}/index`,
   );
+}
+
+export function listCollectionAgents(collectionId: string): Promise<Agent[]> {
+  return api<Agent[]>(`/v1/collections/${collectionId}/agents`);
+}
+
+export function attachCollectionAgent(
+  collectionId: string,
+  agentId: string,
+): Promise<Agent> {
+  return api<Agent>(`/v1/collections/${collectionId}/agents`, {
+    method: "POST",
+    body: JSON.stringify({ agentId }),
+  });
+}
+
+export function detachCollectionAgent(
+  collectionId: string,
+  agentId: string,
+): Promise<void> {
+  return api<void>(`/v1/collections/${collectionId}/agents/${agentId}`, {
+    method: "DELETE",
+  });
 }
 
 export function createCollection(body: {

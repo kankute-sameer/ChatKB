@@ -47,19 +47,22 @@ export function AgentDetailPage() {
     useState<ConversationDetail | null>(null);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [attachedCollections, setAttachedCollections] = useState<Collection[]>([]);
-  const [collectionDraft, setCollectionDraft] = useState<string[]>([]);
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
-  const [savingCollections, setSavingCollections] = useState(false);
+  const [connectingCollectionId, setConnectingCollectionId] = useState<string | null>(
+    null,
+  );
   const [collectionError, setCollectionError] = useState<string | null>(null);
 
   const refreshAgent = useCallback(async () => {
     if (!id) return;
     try {
-      const [latest, instructions] = await Promise.all([
+      const [latest, instructions, attached] = await Promise.all([
         getAgent(id),
         getAgentInstructions(id),
+        getAgentCollections(id),
       ]);
       setAgent({ ...latest, instructions: instructions.instructions });
+      setAttachedCollections(attached);
     } catch {
       setMissing(true);
     }
@@ -97,25 +100,46 @@ export function AgentDetailPage() {
   };
 
   const openCollectionPicker = () => {
-    setCollectionDraft(attachedCollections.map((collection) => collection.id));
     setCollectionError(null);
     setCollectionPickerOpen(true);
   };
 
-  const saveCollections = async () => {
-    if (!agent) return;
-    setSavingCollections(true);
+  const connectCollection = async (collectionId: string) => {
+    if (!agent || connectingCollectionId) return;
+    setConnectingCollectionId(collectionId);
     setCollectionError(null);
     try {
-      const attached = await setAgentCollections(agent.id, collectionDraft);
+      const nextIds = [
+        ...attachedCollections.map((collection) => collection.id),
+        collectionId,
+      ];
+      const attached = await setAgentCollections(agent.id, nextIds);
       setAttachedCollections(attached);
-      setCollectionPickerOpen(false);
     } catch (error) {
       setCollectionError(
-        error instanceof Error ? error.message : "Could not save attachments.",
+        error instanceof Error ? error.message : "Could not connect knowledge base.",
       );
     } finally {
-      setSavingCollections(false);
+      setConnectingCollectionId(null);
+    }
+  };
+
+  const removeCollection = async (collectionId: string) => {
+    if (!agent || connectingCollectionId) return;
+    setConnectingCollectionId(collectionId);
+    setCollectionError(null);
+    try {
+      const nextIds = attachedCollections
+        .map((collection) => collection.id)
+        .filter((id) => id !== collectionId);
+      const attached = await setAgentCollections(agent.id, nextIds);
+      setAttachedCollections(attached);
+    } catch (error) {
+      setCollectionError(
+        error instanceof Error ? error.message : "Could not remove knowledge base.",
+      );
+    } finally {
+      setConnectingCollectionId(null);
     }
   };
 
@@ -259,21 +283,17 @@ export function AgentDetailPage() {
       <KnowledgeBasePickerDialog
         open={collectionPickerOpen}
         collections={collections}
-        selectedIds={collectionDraft}
-        saving={savingCollections}
+        attachedIds={attachedCollections.map((collection) => collection.id)}
+        connectingId={connectingCollectionId}
         error={collectionError}
         onOpenChange={(open) => {
-          if (!savingCollections) setCollectionPickerOpen(open);
+          if (connectingCollectionId == null) setCollectionPickerOpen(open);
         }}
-        onToggle={(collectionId) => {
-          setCollectionDraft((current) =>
-            current.includes(collectionId)
-              ? current.filter((id) => id !== collectionId)
-              : [...current, collectionId],
-          );
+        onConnect={(collectionId) => {
+          void connectCollection(collectionId);
         }}
-        onSave={() => {
-          void saveCollections();
+        onRemove={(collectionId) => {
+          void removeCollection(collectionId);
         }}
       />
     </>
