@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
+        build-essential \
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
