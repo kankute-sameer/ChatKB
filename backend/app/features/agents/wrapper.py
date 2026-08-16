@@ -29,9 +29,15 @@ a raw URL as a citation.
 """
 
 KB_SEARCH_GUIDANCE = """\
+When both `kb_search` and `web_search` are available, search the knowledge base \
+first for every question that could be answered from the attached documents. \
+Use `web_search` only when `kb_search` returns no useful results, or when you \
+still need fresh public information the documents do not cover. Prefer grounding \
+the answer in KB sources whenever they help; combine both when KB is partial and \
+the web fills a clear gap.
+
 When you use `kb_search`, cite facts with `[cite:<cite_id>]` using the `cite_id` \
-of the result you used, same as web search. Prefer the knowledge base over web \
-search when the answer is likely in the attached documents.
+of the result you used, same as web search.
 """
 
 QUERY_TABLE_GUIDANCE = """\
