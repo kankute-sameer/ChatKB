@@ -37,6 +37,8 @@ from app.features.conversations.schemas import (
     ConversationDetail,
     ConversationSummary,
     CreateResponseRequest,
+    MessageFeedbackRequest,
+    MessageFeedbackResponse,
     StopRequest,
     StopResponse,
     UIMessage,
@@ -367,6 +369,38 @@ class ConversationService:
         conversation = await self._owned(conversation_id, owner_id)
         return self._to_detail(conversation)
 
+    async def score_message(
+        self,
+        owner_id: str,
+        conversation_id: str,
+        message_id: str,
+        body: MessageFeedbackRequest,
+    ) -> MessageFeedbackResponse:
+        await self._owned(conversation_id, owner_id)
+        message = await self.repo.get_message(conversation_id, message_id)
+        if message is None or message.role != "assistant":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assistant message not found",
+            )
+
+        tracer = get_tracer()
+        tracer.score_trace(
+            message_id,
+            name="user-feedback",
+            value=body.rating == "up",
+            score_id_seed=f"user-feedback:{message_id}",
+            comment=(body.comment or "").strip() or None,
+            metadata={
+                "conversation_id": conversation_id,
+                "assistant_message_id": message_id,
+                "user_id": owner_id,
+                "rating": body.rating,
+            },
+        )
+        tracer.schedule_flush()
+        return MessageFeedbackResponse(rating=body.rating)
+
     async def start_response(
         self, owner_id: str, body: CreateResponseRequest
     ) -> StreamingResponse:
@@ -546,6 +580,7 @@ async def run_generation(
             input=user_text,
             session_id=conversation_id,
             user_id=owner_id,
+            trace_id_seed=assistant_message_id,
             metadata={
                 "user_id": owner_id,
                 "user_name": owner_id,
@@ -553,6 +588,7 @@ async def run_generation(
                 "agent_name": None,
                 "build_session": False,
                 "response_id": response_id,
+                "assistant_message_id": assistant_message_id,
             },
         ) as turn:
             try:

@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.tracing import ObservationType
+from app.core.tracing import ObservationType, ScoreDataType
 
 
 @dataclass
@@ -18,6 +18,7 @@ class RecordedObservation:
     model: str | None = None
     session_id: str | None = None
     user_id: str | None = None
+    trace_id_seed: str | None = None
     parent: str | None = None
     updates: list[dict[str, Any]] = field(default_factory=list)
 
@@ -29,6 +30,7 @@ class RecordingTracer:
     def __init__(self) -> None:
         self.observations: list[RecordedObservation] = []
         self.flushes = 0
+        self.scores: list[dict[str, Any]] = []
         self._current: ContextVar[str | None] = ContextVar(
             "recording_trace_parent",
             default=None,
@@ -43,6 +45,7 @@ class RecordingTracer:
         session_id: str | None = None,
         user_id: str | None = None,
         metadata: Any = None,
+        trace_id_seed: str | None = None,
     ) -> Iterator[RecordedObservation]:
         with self._record(
             name,
@@ -51,6 +54,7 @@ class RecordingTracer:
             metadata=metadata,
             session_id=session_id,
             user_id=user_id,
+            trace_id_seed=trace_id_seed,
         ) as observation:
             yield observation
 
@@ -96,6 +100,7 @@ class RecordingTracer:
         model: str | None = None,
         session_id: str | None = None,
         user_id: str | None = None,
+        trace_id_seed: str | None = None,
     ) -> Iterator[RecordedObservation]:
         observation = RecordedObservation(
             name=name,
@@ -105,6 +110,7 @@ class RecordingTracer:
             model=model,
             session_id=session_id,
             user_id=user_id,
+            trace_id_seed=trace_id_seed,
             parent=self._current.get(),
         )
         self.observations.append(observation)
@@ -116,6 +122,29 @@ class RecordingTracer:
 
     def schedule_flush(self) -> None:
         self.flushes += 1
+
+    def score_trace(
+        self,
+        trace_id_seed: str,
+        *,
+        name: str,
+        value: bool | str,
+        data_type: ScoreDataType = "BOOLEAN",
+        score_id_seed: str | None = None,
+        comment: str | None = None,
+        metadata: Any = None,
+    ) -> None:
+        self.scores.append(
+            {
+                "trace_id_seed": trace_id_seed,
+                "name": name,
+                "value": value,
+                "data_type": data_type,
+                "score_id_seed": score_id_seed,
+                "comment": comment,
+                "metadata": metadata,
+            }
+        )
 
     async def shutdown(self) -> None:
         return

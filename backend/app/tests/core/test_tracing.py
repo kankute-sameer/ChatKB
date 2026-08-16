@@ -60,9 +60,17 @@ def test_trace_propagates_user_before_observation(
             return None
 
     class _Client:
+        def create_trace_id(self, *, seed: str) -> str:
+            attrs.setdefault("trace_seeds", []).append(seed)
+            return f"trace:{seed}"
+
         def start_as_current_observation(self, **kwargs: Any) -> _Manager:
             attrs["observation_metadata"] = kwargs.get("metadata")
+            attrs["trace_context"] = kwargs.get("trace_context")
             return _Manager()
+
+        def create_score(self, **kwargs: Any) -> None:
+            attrs["score"] = kwargs
 
     def _propagate(**kwargs: Any) -> _Attrs:
         attrs["propagate"] = kwargs
@@ -76,8 +84,15 @@ def test_trace_propagates_user_before_observation(
         session_id="conv_1",
         user_id="alice",
         metadata={"response_id": "resp_1"},
+        trace_id_seed="msg_1",
     ):
         pass
+    tracer.score_trace(
+        "msg_1",
+        name="user-feedback",
+        value=True,
+        score_id_seed="feedback:msg_1",
+    )
 
     assert calls == ["attrs", "observation"]
     assert attrs["propagate"]["user_id"] == "alice"
@@ -85,6 +100,11 @@ def test_trace_propagates_user_before_observation(
     assert attrs["observation_metadata"]["user_id"] == "alice"
     assert attrs["observation_metadata"]["user_name"] == "alice"
     assert attrs["observation_metadata"]["response_id"] == "resp_1"
+    assert attrs["trace_context"] == {"trace_id": "trace:msg_1"}
+    assert attrs["trace_seeds"] == ["msg_1", "msg_1", "feedback:msg_1"]
+    assert attrs["score"]["trace_id"] == "trace:msg_1"
+    assert attrs["score"]["score_id"] == "trace:feedback:msg_1"
+    assert attrs["score"]["value"] is True
 
 
 def test_large_trace_payloads_are_truncated() -> None:

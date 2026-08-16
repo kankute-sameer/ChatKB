@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   Copy,
   FileText,
   Mic,
@@ -15,6 +16,12 @@ import { ActivityTimeline } from "@/components/ActivityTimeline";
 import type { DocumentCitationSource } from "@/components/ai-elements/inline-citation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { LandingHero } from "@/components/LandingHero";
 import { MarkdownBody } from "@/components/MarkdownBody";
 import { TwinOrbit } from "@/components/TwinOrbit";
@@ -25,6 +32,75 @@ import {
 } from "@/lib/activity";
 import type { ChatMessage } from "@/mocks/data";
 import { cn } from "@/lib/utils";
+
+const CITE_MARKER = /\[cite:[0-9a-fA-F]{8}\]/g;
+type MessageFeedback = "up" | "down";
+type FeedbackHandler = (
+  messageId: string,
+  rating: MessageFeedback,
+  comment?: string,
+) => Promise<void>;
+
+function textForClipboard(raw: string): string {
+  return raw.replace(CITE_MARKER, "").replace(/[ \t]+\n/g, "\n").trim();
+}
+
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.left = "-9999px";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function CopyTextButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current != null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={copied ? "Copied" : "Copy"}
+      onClick={() => {
+        void (async () => {
+          const ok = await writeClipboard(textForClipboard(text));
+          if (!ok) return;
+          setCopied(true);
+          if (timer.current != null) window.clearTimeout(timer.current);
+          timer.current = window.setTimeout(() => setCopied(false), 1500);
+        })();
+      }}
+    >
+      {copied ? (
+        <Check className="size-4 text-gray-400" />
+      ) : (
+        <Copy className="size-4 text-gray-400" />
+      )}
+    </Button>
+  );
+}
 
 interface ComposerProps {
   placeholder?: string;
@@ -146,6 +222,7 @@ interface ChatViewProps {
   isStreaming?: boolean;
   disabled?: boolean;
   onOpenDocument?: (source: DocumentCitationSource) => void;
+  onFeedback?: FeedbackHandler;
 }
 
 export function ChatView({
@@ -163,6 +240,7 @@ export function ChatView({
   isStreaming,
   disabled,
   onOpenDocument,
+  onFeedback,
 }: ChatViewProps) {
   const composer = (
     <Composer
@@ -208,6 +286,7 @@ export function ChatView({
         composerFooter={composerFooter}
         isStreaming={isStreaming}
         onOpenDocument={onOpenDocument}
+        onFeedback={onFeedback}
       />
     </div>
   );
@@ -220,6 +299,7 @@ function ThreadBody({
   composerFooter,
   isStreaming,
   onOpenDocument,
+  onFeedback,
 }: {
   messages: ChatMessage[];
   emptyState?: ReactNode;
@@ -227,6 +307,7 @@ function ThreadBody({
   composerFooter?: ReactNode;
   isStreaming?: boolean;
   onOpenDocument?: (source: DocumentCitationSource) => void;
+  onFeedback?: FeedbackHandler;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -287,6 +368,7 @@ function ThreadBody({
                     key={message.id}
                     message={message}
                     onOpenDocument={onOpenDocument}
+                    onFeedback={onFeedback}
                   />
                 ))}
             {waitingForText && !lastHasActivity ? <TwinOrbit size={24} /> : null}
@@ -323,9 +405,11 @@ function ThreadBody({
 function MessageBlock({
   message,
   onOpenDocument,
+  onFeedback,
 }: {
   message: ChatMessage;
   onOpenDocument?: (source: DocumentCitationSource) => void;
+  onFeedback?: FeedbackHandler;
 }) {
   if (message.role === "user") {
     return (
@@ -339,28 +423,29 @@ function MessageBlock({
           {message.content}
         </div>
         <div className="flex items-center gap-1 opacity-0 transition-opacity duration-color ease-out group-hover:opacity-100 group-focus-within:opacity-100">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Copy"
-            onClick={() => void navigator.clipboard.writeText(message.content)}
-          >
-            <Copy className="size-4 text-gray-400" />
-          </Button>
+          <CopyTextButton text={message.content} />
         </div>
       </div>
     );
   }
 
-  return <AssistantTurn message={message} onOpenDocument={onOpenDocument} />;
+  return (
+    <AssistantTurn
+      message={message}
+      onOpenDocument={onOpenDocument}
+      onFeedback={onFeedback}
+    />
+  );
 }
 
 function AssistantTurn({
   message,
   onOpenDocument,
+  onFeedback,
 }: {
   message: ChatMessage;
   onOpenDocument?: (source: DocumentCitationSource) => void;
+  onFeedback?: FeedbackHandler;
 }) {
   const segments = messageSegments(message);
   const streamingMessage = Boolean(message.streaming);
@@ -368,6 +453,11 @@ function AssistantTurn({
   const answerStarted = segments.some((segment) => segment.text.trim());
   const startedAt = useRef<number | null>(null);
   const [seconds, setSeconds] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<MessageFeedback | null>(null);
+  const [feedbackPending, setFeedbackPending] = useState(false);
+  const [downDialogOpen, setDownDialogOpen] = useState(false);
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   useEffect(() => {
     if (streamingMessage && !answerStarted) {
@@ -382,6 +472,25 @@ function AssistantTurn({
       setSeconds((current) => current ?? elapsed);
     }
   }, [streamingMessage, answerStarted]);
+
+  const submitFeedback = async (
+    rating: MessageFeedback,
+    comment?: string,
+  ): Promise<boolean> => {
+    if (!onFeedback || feedbackPending || feedback === rating) return false;
+    setFeedbackPending(true);
+    setFeedbackError(null);
+    try {
+      await onFeedback(message.id, rating, comment);
+      setFeedback(rating);
+      return true;
+    } catch {
+      setFeedbackError("Could not send feedback. Please try again.");
+      return false;
+    } finally {
+      setFeedbackPending(false);
+    }
+  };
 
   return (
     <div className="group flex max-w-full flex-col gap-2 bg-background">
@@ -418,19 +527,51 @@ function AssistantTurn({
 
       {hasContent ? (
         <div className="flex items-center gap-1 opacity-0 transition-opacity duration-color ease-out group-hover:opacity-100 group-focus-within:opacity-100">
+          <CopyTextButton text={message.content} />
           <Button
+            type="button"
             variant="ghost"
             size="icon"
-            aria-label="Copy"
-            onClick={() => void navigator.clipboard.writeText(message.content)}
+            aria-label="Good response"
+            aria-pressed={feedback === "up"}
+            disabled={
+              !onFeedback ||
+              feedbackPending ||
+              streamingMessage ||
+              feedback === "up"
+            }
+            onClick={() => void submitFeedback("up")}
           >
-            <Copy className="size-4 text-gray-400" />
+            <ThumbsUp
+              className={cn(
+                "size-4",
+                feedback === "up" ? "fill-current text-green-600" : "text-gray-400",
+              )}
+            />
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Good response">
-            <ThumbsUp className="size-4 text-gray-400" />
-          </Button>
-          <Button variant="ghost" size="icon" aria-label="Bad response">
-            <ThumbsDown className="size-4 text-gray-400" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Bad response"
+            aria-pressed={feedback === "down"}
+            disabled={
+              !onFeedback ||
+              feedbackPending ||
+              streamingMessage ||
+              feedback === "down"
+            }
+            onClick={() => {
+              setFeedbackError(null);
+              setDownDialogOpen(true);
+            }}
+          >
+            <ThumbsDown
+              className={cn(
+                "size-4",
+                feedback === "down" ? "fill-current text-red-600" : "text-gray-400",
+              )}
+            />
           </Button>
         </div>
       ) : null}
@@ -445,6 +586,78 @@ function AssistantTurn({
           ))}
         </div>
       ) : null}
+
+      <Dialog
+        open={downDialogOpen}
+        onOpenChange={(open) => {
+          if (feedbackPending) return;
+          setDownDialogOpen(open);
+          if (!open) {
+            setFeedbackComment("");
+            setFeedbackError(null);
+          }
+        }}
+      >
+        <DialogContent className="w-[min(620px,calc(100vw-4rem))] max-w-none rounded-lg px-8 py-10">
+          <DialogHeader>
+            <DialogTitle className="text-title font-normal">
+              What could be better?
+            </DialogTitle>
+            <p className="mt-2 font-sans text-nav font-ui text-ink-muted">
+              Tell us why this response was not helpful. Your feedback helps
+              improve future answers.
+            </p>
+          </DialogHeader>
+          <form
+            className="mt-8 flex flex-col gap-5 font-sans text-nav font-ui"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const comment = feedbackComment.trim();
+              if (!comment) return;
+              void submitFeedback("down", comment).then((sent) => {
+                if (!sent) return;
+                setDownDialogOpen(false);
+                setFeedbackComment("");
+              });
+            }}
+          >
+            <label className="flex flex-col gap-2">
+              <span className="text-ink">Reason</span>
+              <textarea
+                value={feedbackComment}
+                onChange={(event) => setFeedbackComment(event.target.value)}
+                placeholder="What was incorrect, missing, or unclear?"
+                rows={5}
+                maxLength={2000}
+                autoFocus
+                className="flex min-h-32 w-full resize-none rounded-lg border border-input bg-background px-3 py-3 font-sans text-nav font-ui text-foreground placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={feedbackPending}
+              />
+            </label>
+            {feedbackError ? (
+              <p className="text-destructive">{feedbackError}</p>
+            ) : null}
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                className="rounded-full"
+                disabled={feedbackPending}
+                onClick={() => setDownDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-full bg-gray-900 px-6 text-white hover:bg-gray-800"
+                disabled={feedbackPending || !feedbackComment.trim()}
+              >
+                {feedbackPending ? "Sending…" : "Send feedback"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

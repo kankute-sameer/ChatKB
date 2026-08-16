@@ -21,6 +21,7 @@ from app.features.conversations import models as conversation_models  # noqa: F4
 from app.features.conversations.buffer import InMemoryStreamStore
 from app.features.conversations.router import router as conversations_router
 from app.features.conversations.tools import WebSearchTool
+from app.features.feedback.router import router as feedback_router
 from app.features.kb import models as kb_models  # noqa: F401
 from app.features.kb.ingestion.embed import GeminiEmbedder
 from app.features.kb.router import router as kb_router
@@ -95,6 +96,7 @@ def create_app() -> FastAPI:
         kb_router,
         dependencies=[Depends(get_current_user)],
     )
+    app.include_router(feedback_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

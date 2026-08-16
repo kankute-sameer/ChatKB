@@ -109,6 +109,19 @@ class ConversationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_message(
+        self,
+        conversation_id: str,
+        message_id: str,
+    ) -> Message | None:
+        result = await self.session.execute(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def set_active_response(
         self,
         conversation_id: str,

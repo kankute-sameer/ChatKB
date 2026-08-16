@@ -99,3 +99,12 @@ class StopRequest(BaseModel):
 
 class StopResponse(BaseModel):
     success: bool = True
+
+
+class MessageFeedbackRequest(BaseModel):
+    rating: Literal["up", "down"]
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class MessageFeedbackResponse(BaseModel):
+    rating: Literal["up", "down"]

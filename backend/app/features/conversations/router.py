@@ -14,6 +14,8 @@ from app.features.conversations.schemas import (
     ConversationDetail,
     ConversationSummary,
     CreateResponseRequest,
+    MessageFeedbackRequest,
+    MessageFeedbackResponse,
     StopRequest,
     StopResponse,
 )
@@ -95,6 +97,20 @@ async def get_conversation(
     service: Annotated[ConversationService, Depends(get_service)],
 ) -> ConversationDetail:
     return await service.get_conversation(owner_id, conversation_id)
+
+
+@router.put(
+    "/v1/conversations/{conversation_id}/messages/{message_id}/feedback",
+    response_model=MessageFeedbackResponse,
+)
+async def score_message(
+    conversation_id: str,
+    message_id: str,
+    body: MessageFeedbackRequest,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[ConversationService, Depends(get_service)],
+) -> MessageFeedbackResponse:
+    return await service.score_message(owner_id, conversation_id, message_id, body)
 
 
 @router.get("/v1/conversations/{conversation_id}/stream")

@@ -13,6 +13,7 @@ import { AgentChip } from "@/features/agents/AgentChip";
 import {
   getConversation,
   notifyConversationsChanged,
+  scoreMessage,
   stoppedStorageKey,
   textFromParts,
   type ConversationDetail,
@@ -267,6 +268,11 @@ export function ConversationChat({
           onStop={onStop}
           isStreaming={isStreaming}
           onOpenDocument={setOpenDocument}
+          onFeedback={(messageId, rating, comment) =>
+            scoreMessage(conversation.id, messageId, rating, comment).then(
+              () => undefined,
+            )
+          }
         />
       </div>
       {openDocument ? (

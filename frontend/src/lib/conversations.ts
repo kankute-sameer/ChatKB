@@ -65,6 +65,23 @@ export function listConversations(): Promise<ConversationSummary[]> {
   return api<ConversationSummary[]>("/v1/conversations?limit=50");
 }
 
+export type MessageFeedback = "up" | "down";
+
+export function scoreMessage(
+  conversationId: string,
+  messageId: string,
+  rating: MessageFeedback,
+  comment?: string,
+): Promise<{ rating: MessageFeedback }> {
+  return api<{ rating: MessageFeedback }>(
+    `/v1/conversations/${conversationId}/messages/${messageId}/feedback`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ rating, comment }),
+    },
+  );
+}
+
 export function stoppedStorageKey(conversationId: string): string {
   return `chatkb.stopped:${conversationId}`;
 }

@@ -20,6 +20,7 @@ ObservationType = Literal[
     "agent",
     "chain",
 ]
+ScoreDataType = Literal["BOOLEAN", "TEXT"]
 
 
 class Observation(Protocol):
@@ -35,6 +36,7 @@ class Tracer(Protocol):
         session_id: str | None = None,
         user_id: str | None = None,
         metadata: Any = None,
+        trace_id_seed: str | None = None,
     ) -> Any: ...
 
     def span(
@@ -57,6 +59,18 @@ class Tracer(Protocol):
 
     def schedule_flush(self) -> None: ...
 
+    def score_trace(
+        self,
+        trace_id_seed: str,
+        *,
+        name: str,
+        value: bool | str,
+        data_type: ScoreDataType = "BOOLEAN",
+        score_id_seed: str | None = None,
+        comment: str | None = None,
+        metadata: Any = None,
+    ) -> None: ...
+
     async def shutdown(self) -> None: ...
 
 
@@ -75,8 +89,9 @@ class NullTracer:
         session_id: str | None = None,
         user_id: str | None = None,
         metadata: Any = None,
+        trace_id_seed: str | None = None,
     ) -> Iterator[Observation]:
-        del name, input, session_id, user_id, metadata
+        del name, input, session_id, user_id, metadata, trace_id_seed
         yield NullObservation()
 
     @contextmanager
@@ -103,6 +118,19 @@ class NullTracer:
 
     def schedule_flush(self) -> None:
         return
+
+    def score_trace(
+        self,
+        trace_id_seed: str,
+        *,
+        name: str,
+        value: bool | str,
+        data_type: ScoreDataType = "BOOLEAN",
+        score_id_seed: str | None = None,
+        comment: str | None = None,
+        metadata: Any = None,
+    ) -> None:
+        del trace_id_seed, name, value, data_type, score_id_seed, comment, metadata
 
     async def shutdown(self) -> None:
         return
@@ -139,6 +167,7 @@ class LangfuseTracer:
         session_id: str | None = None,
         user_id: str | None = None,
         metadata: Any = None,
+        trace_id_seed: str | None = None,
     ) -> Iterator[Observation]:
         # Attach user/session before opening the root observation so Langfuse
         # tags the whole trace, not only later child spans.
@@ -165,6 +194,7 @@ class LangfuseTracer:
                 input=input,
                 metadata=merged_metadata,
                 as_type="span",
+                trace_id_seed=trace_id_seed,
             ) as observation:
                 yield observation
         except BaseException:
@@ -219,15 +249,22 @@ class LangfuseTracer:
         metadata: Any,
         as_type: ObservationType,
         model: str | None = None,
+        trace_id_seed: str | None = None,
     ) -> Iterator[Observation]:
         manager = None
         try:
+            trace_context = None
+            if trace_id_seed:
+                trace_context = {
+                    "trace_id": self._client.create_trace_id(seed=trace_id_seed)
+                }
             manager = self._client.start_as_current_observation(
                 name=name,
                 as_type=as_type,
                 input=compact_trace_value(input),
                 metadata=compact_trace_value(metadata),
                 model=model,
+                trace_context=trace_context,
             )
             raw = manager.__enter__()
             observation: Observation = SafeObservation(raw, self._log)
@@ -248,6 +285,36 @@ class LangfuseTracer:
                     manager.__exit__(*error)
                 except Exception as exc:
                     self._log.warning("Langfuse observation close failed: %s", exc)
+
+    def score_trace(
+        self,
+        trace_id_seed: str,
+        *,
+        name: str,
+        value: bool | str,
+        data_type: ScoreDataType = "BOOLEAN",
+        score_id_seed: str | None = None,
+        comment: str | None = None,
+        metadata: Any = None,
+    ) -> None:
+        try:
+            trace_id = self._client.create_trace_id(seed=trace_id_seed)
+            score_id = (
+                self._client.create_trace_id(seed=score_id_seed)
+                if score_id_seed
+                else None
+            )
+            self._client.create_score(
+                trace_id=trace_id,
+                score_id=score_id,
+                name=name,
+                value=value,
+                data_type=data_type,
+                comment=comment,
+                metadata=compact_trace_value(metadata),
+            )
+        except Exception as exc:
+            self._log.warning("Langfuse trace score failed: %s", exc)
 
     def schedule_flush(self) -> None:
         try:

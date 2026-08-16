@@ -4,12 +4,14 @@ import {
   Activity,
   BookOpen,
   LogOut,
+  MessageSquareText,
   PanelLeft,
   Plus,
   Search,
   User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FeedbackDialog } from "@/components/FeedbackDialog";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { useAgentList } from "@/features/agents/useAgentList";
@@ -49,6 +51,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const filteredChats = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return chats;
@@ -181,6 +184,26 @@ export function Sidebar() {
         </>
       )}
 
+      <div className="mt-auto pt-2">
+        <button
+          type="button"
+          className={cn(
+            rowClass,
+            "w-full text-left",
+            collapsed && "justify-center gap-0 px-0",
+          )}
+          aria-label="Send feedback"
+          title={collapsed ? "Feedback" : undefined}
+          onClick={() => setFeedbackOpen(true)}
+        >
+          <MessageSquareText
+            className="size-icon shrink-0"
+            strokeWidth={1.75}
+          />
+          {collapsed ? null : <RowLabel>Feedback</RowLabel>}
+        </button>
+      </div>
+
       <div className="mt-2 border-t border-border pt-2">
         {collapsed ? (
           <Button
@@ -208,6 +231,7 @@ export function Sidebar() {
           </div>
         )}
       </div>
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </aside>
   );
 }

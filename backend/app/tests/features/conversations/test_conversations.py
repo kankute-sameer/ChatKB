@@ -252,7 +252,19 @@ async def test_turn_trace_groups_generation_by_conversation_and_user(
             },
         )
         assert response.status_code == 200
-        await _wait_until_idle(client, token, conversation_id)
+        detail = await _wait_until_idle(client, token, conversation_id)
+        assistant_id = next(
+            str(message["id"])
+            for message in detail["messages"]
+            if message["role"] == "assistant"
+        )
+        feedback = await client.put(
+            f"/v1/conversations/{conversation_id}/messages/{assistant_id}/feedback",
+            headers=_headers(token),
+            json={"rating": "down", "comment": "The answer missed an important detail."},
+        )
+        assert feedback.status_code == 200
+        assert feedback.json() == {"rating": "down"}
     finally:
         set_tracer(NullTracer())
 
@@ -267,7 +279,25 @@ async def test_turn_trace_groups_generation_by_conversation_and_user(
     assert turns[0].input == "Hi there"
     assert turns[0].metadata["user_id"] == TEST_USERNAME
     assert turns[0].metadata["user_name"] == TEST_USERNAME
+    assert turns[0].trace_id_seed == assistant_id
+    assert turns[0].metadata["assistant_message_id"] == assistant_id
     assert any(update.get("output") == "Hello world" for update in turns[0].updates)
+    assert tracer.scores == [
+        {
+            "trace_id_seed": assistant_id,
+            "name": "user-feedback",
+            "value": False,
+            "data_type": "BOOLEAN",
+            "score_id_seed": f"user-feedback:{assistant_id}",
+            "comment": "The answer missed an important detail.",
+            "metadata": {
+                "conversation_id": conversation_id,
+                "assistant_message_id": assistant_id,
+                "user_id": TEST_USERNAME,
+                "rating": "down",
+            },
+        }
+    ]
 
     generations = [
         observation
@@ -282,6 +312,52 @@ async def test_turn_trace_groups_generation_by_conversation_and_user(
         "output_tokens": 2,
         "total_tokens": 10,
     }
+
+
+@pytest.mark.asyncio
+async def test_sidebar_feedback_creates_langfuse_trace_and_text_score(
+    client: AsyncClient,
+) -> None:
+    tracer = RecordingTracer()
+    set_tracer(tracer)
+    try:
+        token = await _token(client)
+        response = await client.post(
+            "/v1/feedback",
+            headers=_headers(token),
+            json={"comment": "The knowledge base workflow is easy to use."},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"submitted": True}
+    finally:
+        set_tracer(NullTracer())
+
+    feedback_traces = [
+        observation
+        for observation in tracer.observations
+        if observation.name == "product.feedback"
+    ]
+    assert len(feedback_traces) == 1
+    assert feedback_traces[0].trace_id_seed is not None
+    assert feedback_traces[0].user_id == TEST_USERNAME
+    assert feedback_traces[0].metadata["source"] == "sidebar"
+    assert tracer.scores == [
+        {
+            "trace_id_seed": feedback_traces[0].trace_id_seed,
+            "name": "experience-feedback",
+            "value": "The knowledge base workflow is easy to use.",
+            "data_type": "TEXT",
+            "score_id_seed": (
+                f"experience-feedback:{feedback_traces[0].trace_id_seed}"
+            ),
+            "comment": "The knowledge base workflow is easy to use.",
+            "metadata": {
+                "feedback_id": feedback_traces[0].trace_id_seed,
+                "user_id": TEST_USERNAME,
+                "source": "sidebar",
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio
