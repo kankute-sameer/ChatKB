@@ -201,6 +201,8 @@ async def test_pipeline_persists_chunks_and_marks_ready(
     assert len(ingestion) == 1
     assert ingestion[0].session_id == collection_id
     assert ingestion[0].user_id == "alice"
+    assert ingestion[0].metadata["user_id"] == "alice"
+    assert ingestion[0].metadata["user_name"] == "alice"
     assert {
         "store",
         "extract",

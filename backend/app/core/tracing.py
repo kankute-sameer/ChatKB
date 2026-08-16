@@ -140,41 +140,44 @@ class LangfuseTracer:
         user_id: str | None = None,
         metadata: Any = None,
     ) -> Iterator[Observation]:
-        with self._observation(
-            name,
-            input=input,
-            metadata=metadata,
-            as_type="span",
-        ) as observation:
-            attributes = None
-            if not isinstance(observation, NullObservation):
-                try:
-                    from langfuse import propagate_attributes
+        # Attach user/session before opening the root observation so Langfuse
+        # tags the whole trace, not only later child spans.
+        merged_metadata = _with_user_fields(metadata, user_id)
+        attributes = None
+        try:
+            from langfuse import propagate_attributes
 
-                    attributes = propagate_attributes(
-                        session_id=session_id,
-                        user_id=user_id,
-                        trace_name=name,
-                        metadata=compact_trace_value(metadata),
-                    )
-                    attributes.__enter__()
-                except Exception as exc:
-                    attributes = None
-                    self._log.warning("Langfuse trace attributes failed: %s", exc)
-            error: tuple[Any, Any, Any] = (None, None, None)
-            try:
+            attributes = propagate_attributes(
+                session_id=session_id,
+                user_id=user_id,
+                trace_name=name,
+                metadata=compact_trace_value(merged_metadata),
+            )
+            attributes.__enter__()
+        except Exception as exc:
+            attributes = None
+            self._log.warning("Langfuse trace attributes failed: %s", exc)
+
+        error: tuple[Any, Any, Any] = (None, None, None)
+        try:
+            with self._observation(
+                name,
+                input=input,
+                metadata=merged_metadata,
+                as_type="span",
+            ) as observation:
                 yield observation
-            except BaseException:
-                error = sys.exc_info()
-                raise
-            finally:
-                if attributes is not None:
-                    try:
-                        attributes.__exit__(*error)
-                    except Exception as exc:
-                        self._log.warning(
-                            "Langfuse trace attribute close failed: %s", exc
-                        )
+        except BaseException:
+            error = sys.exc_info()
+            raise
+        finally:
+            if attributes is not None:
+                try:
+                    attributes.__exit__(*error)
+                except Exception as exc:
+                    self._log.warning(
+                        "Langfuse trace attribute close failed: %s", exc
+                    )
 
     def span(
         self,
@@ -304,6 +307,15 @@ def get_tracer() -> Tracer:
 def set_tracer(tracer: Tracer) -> None:
     global _tracer
     _tracer = tracer
+
+
+def _with_user_fields(metadata: Any, user_id: str | None) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(metadata) if isinstance(metadata, dict) else {}
+    if user_id:
+        # Auth subject is both the stable id and display name in this app.
+        merged.setdefault("user_id", user_id)
+        merged.setdefault("user_name", user_id)
+    return merged
 
 
 def compact_trace_value(value: Any, *, depth: int = 0) -> Any:

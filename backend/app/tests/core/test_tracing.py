@@ -33,6 +33,60 @@ def test_tracing_is_disabled_without_keys() -> None:
         trace.update(output="still works")
 
 
+def test_trace_propagates_user_before_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    attrs: dict[str, Any] = {}
+
+    class _Attrs:
+        def __enter__(self) -> None:
+            calls.append("attrs")
+            return None
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+    class _Obs:
+        def update(self, **_kwargs: Any) -> None:
+            return None
+
+    class _Manager:
+        def __enter__(self) -> _Obs:
+            calls.append("observation")
+            return _Obs()
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+    class _Client:
+        def start_as_current_observation(self, **kwargs: Any) -> _Manager:
+            attrs["observation_metadata"] = kwargs.get("metadata")
+            return _Manager()
+
+    def _propagate(**kwargs: Any) -> _Attrs:
+        attrs["propagate"] = kwargs
+        return _Attrs()
+
+    monkeypatch.setattr("langfuse.propagate_attributes", _propagate)
+    tracer = LangfuseTracer(_Client())
+
+    with tracer.trace(
+        "conversation.turn",
+        session_id="conv_1",
+        user_id="alice",
+        metadata={"response_id": "resp_1"},
+    ):
+        pass
+
+    assert calls == ["attrs", "observation"]
+    assert attrs["propagate"]["user_id"] == "alice"
+    assert attrs["propagate"]["session_id"] == "conv_1"
+    assert attrs["observation_metadata"]["user_id"] == "alice"
+    assert attrs["observation_metadata"]["user_name"] == "alice"
+    assert attrs["observation_metadata"]["response_id"] == "resp_1"
+
+
 def test_large_trace_payloads_are_truncated() -> None:
     compacted = compact_trace_value(
         {

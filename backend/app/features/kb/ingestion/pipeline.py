@@ -63,6 +63,8 @@ async def run_ingestion(
             "filename": row.filename,
             "format": Path(row.filename).suffix.lower().lstrip("."),
             "collection_id": row.collection_id,
+            "user_id": owner_id,
+            "user_name": owner_id,
         }
         with tracer.trace(
             "kb.ingestion",

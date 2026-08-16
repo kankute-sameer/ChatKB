@@ -547,6 +547,8 @@ async def run_generation(
             session_id=conversation_id,
             user_id=owner_id,
             metadata={
+                "user_id": owner_id,
+                "user_name": owner_id,
                 "agent_id": None,
                 "agent_name": None,
                 "build_session": False,
@@ -602,6 +604,8 @@ async def _run_generation_inner(
             agent = await running_agent(session, conversation)
             turn.update(
                 metadata={
+                    "user_id": conversation.owner_id,
+                    "user_name": conversation.owner_id,
                     "agent_id": agent.id if agent is not None else None,
                     "agent_name": agent.name if agent is not None else None,
                     "target_agent_id": conversation.target_agent_id,

@@ -265,6 +265,8 @@ async def test_turn_trace_groups_generation_by_conversation_and_user(
     assert turns[0].session_id == conversation_id
     assert turns[0].user_id == TEST_USERNAME
     assert turns[0].input == "Hi there"
+    assert turns[0].metadata["user_id"] == TEST_USERNAME
+    assert turns[0].metadata["user_name"] == TEST_USERNAME
     assert any(update.get("output") == "Hello world" for update in turns[0].updates)
 
     generations = [
