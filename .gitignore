@@ -32,5 +32,6 @@ __pycache__/
 .ruff_cache/
 .venv/
 backend/.env
+.env.docker
 *.egg-info/
 

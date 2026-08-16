@@ -1,13 +1,40 @@
+name: chatkb
+
+x-backend-environment: &backend-environment
+  DATABASE_URL: postgresql+asyncpg://chatkb:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/chatkb
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
+  AUTH_USERS: ${AUTH_USERS:?Set AUTH_USERS}
+  CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost"]}'
+  LLM_API_KEY: ${LLM_API_KEY:?Set LLM_API_KEY}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+  LLM_MODEL: ${LLM_MODEL:-gpt-5.6-luna}
+  LLM_TITLE_MODEL: ${LLM_TITLE_MODEL:-gpt-5.6-luna}
+  LLM_VISION_MODEL: ${LLM_VISION_MODEL:-gpt-5.6-luna}
+  LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-medium}
+  LLM_REASONING_SUMMARY: ${LLM_REASONING_SUMMARY:-auto}
+  EXA_API_KEY: ${EXA_API_KEY:?Set EXA_API_KEY}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY}
+  INGESTION_MODEL: ${INGESTION_MODEL:-gpt-5.6-luna}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?Set AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Set AWS_SECRET_ACCESS_KEY}
+  AWS_REGION: ${AWS_REGION:?Set AWS_REGION}
+  S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
+  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+  LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: chatkb-postgres
     environment:
       POSTGRES_USER: chatkb
-      POSTGRES_PASSWORD: chatkb
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: chatkb
-    ports:
-      - "5433:5432"
     volumes:
       - chatkb_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +42,55 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+    shm_size: 256mb
+
+  migrate:
+    build:
+      context: ./backend
+    environment: *backend-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+    environment: *backend-environment
+    volumes:
+      - model_cache:/home/chatkb/.cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    init: true
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${APP_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   chatkb_postgres:
+  model_cache:
