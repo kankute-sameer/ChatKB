@@ -353,7 +353,7 @@ async def test_non_pdf_file_view_returns_whole_content_and_authorizes(
 
 
 @pytest.mark.asyncio
-async def test_alice_can_query_collection_observability(
+async def test_user_can_query_collection_observability(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -407,13 +407,28 @@ async def test_alice_can_query_collection_observability(
 
 
 @pytest.mark.asyncio
-async def test_observability_query_is_alice_only(client: AsyncClient) -> None:
+async def test_observability_query_is_available_to_other_users(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_hybrid_search(*args: object, **kwargs: object) -> list[ChunkHit]:
+        return []
+
+    monkeypatch.setattr(
+        "app.features.kb.service.hybrid_search",
+        fake_hybrid_search,
+    )
+    token = create_access_token("bob")
+    collection = await _create_collection(client, token)
+
     response = await client.post(
-        "/v1/observability/collections/col_private/query",
-        headers=_headers(create_access_token("bob")),
+        f"/v1/observability/collections/{collection['id']}/query",
+        headers=_headers(token),
         json={"query": "secret"},
     )
-    assert response.status_code == 403
+
+    assert response.status_code == 200
+    assert response.json() == {"query": "secret", "results": []}
 
 
 @pytest.mark.asyncio

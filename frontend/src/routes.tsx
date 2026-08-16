@@ -1,7 +1,7 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/AppLayout";
 import { LoginPage } from "@/features/auth/LoginPage";
-import { AliceOnly, GuestOnly, RequireAuth } from "@/features/auth/guards";
+import { GuestOnly, RequireAuth } from "@/features/auth/guards";
 import { ChatHomePage } from "@/features/chat/ChatHomePage";
 import { AgentsGalleryPage } from "@/features/agents/AgentsGalleryPage";
 import { AgentChatPage } from "@/features/agents/AgentChatPage";
@@ -30,14 +30,7 @@ export const router = createBrowserRouter([
           { path: "/chat/:id", element: <Navigate to="/" replace /> },
           { path: "/kb", element: <KnowledgeBaseListPage /> },
           { path: "/kb/:id", element: <KnowledgeBaseDetailPage /> },
-          {
-            path: "/observability",
-            element: (
-              <AliceOnly>
-                <ObservabilityPage />
-              </AliceOnly>
-            ),
-          },
+          { path: "/observability", element: <ObservabilityPage /> },
           { path: "*", element: <Navigate to="/" replace /> },
         ],
       },

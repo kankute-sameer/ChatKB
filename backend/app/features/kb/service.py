@@ -274,11 +274,6 @@ class KbService:
         query: str,
         limit: int,
     ) -> ObservabilityQueryResponse:
-        if owner_id != "alice":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Observability is only available to Alice",
-            )
         await self._owned_collection(collection_id, owner_id)
         normalized_query = query.strip()
         if not normalized_query:

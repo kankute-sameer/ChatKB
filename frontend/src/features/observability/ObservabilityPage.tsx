@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, Database, Search } from "lucide-react";
 import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { MarkdownBody } from "@/components/MarkdownBody";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -126,7 +125,6 @@ export function ObservabilityPage() {
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h1 className="font-sans text-nav font-ui font-normal">Observability</h1>
-            <Badge variant="secondary">Alice only</Badge>
           </div>
           <label className="flex items-center gap-3 font-sans text-nav font-ui text-ink-muted">
             Knowledge base

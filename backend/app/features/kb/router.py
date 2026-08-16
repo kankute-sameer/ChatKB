@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
-from app.core.deps import get_current_user, require_alice
+from app.core.deps import get_current_user
 from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage, get_storage
@@ -247,7 +247,7 @@ async def view_file(
 async def query_collection_for_observability(
     collection_id: str,
     body: ObservabilityQueryRequest,
-    owner_id: Annotated[str, Depends(require_alice)],
+    owner_id: Annotated[str, Depends(get_current_user)],
     service: Annotated[KbService, Depends(get_service)],
 ) -> ObservabilityQueryResponse:
     return await service.query_collection_for_observability(

@@ -109,15 +109,13 @@ export function Sidebar() {
             </NavLink>
           );
         })}
-        {username === "alice" ? (
-          <NavLink
-            to="/observability"
-            className={({ isActive }) => rowLinkClass(isActive, collapsed)}
-          >
-            <Activity className="size-icon shrink-0" strokeWidth={1.75} />
-            {collapsed ? null : <RowLabel>Observability</RowLabel>}
-          </NavLink>
-        ) : null}
+        <NavLink
+          to="/observability"
+          className={({ isActive }) => rowLinkClass(isActive, collapsed)}
+        >
+          <Activity className="size-icon shrink-0" strokeWidth={1.75} />
+          {collapsed ? null : <RowLabel>Observability</RowLabel>}
+        </NavLink>
       </nav>
 
       {collapsed ? null : (
