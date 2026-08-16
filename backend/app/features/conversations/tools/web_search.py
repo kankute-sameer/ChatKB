@@ -79,6 +79,11 @@ class WebSearchTool:
         return ToolResult(
             content=_capped_json(tool_results),
             source_parts=source_parts,
+            trace_data={
+                "query": query,
+                "result_count": len(tool_results),
+                "titles": [str(item.get("title") or "") for item in tool_results],
+            },
         )
 
 

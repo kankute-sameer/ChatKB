@@ -4,18 +4,62 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.core.citations import Citations, WebSource
 from app.core.config import get_settings
 from app.core.db import Base
+from app.core.tools import ToolRegistry
+from app.core.tools.protocol import ToolResult
+from app.core.tracing import LangfuseTracer, NullTracer, set_tracer
 from app.features.conversations.schemas import CreateResponseRequest, UIMessage
-from app.features.conversations.service import ConversationService
+from app.features.conversations.service import (
+    ConversationService,
+    PartsAccumulator,
+    _run_agent_loop,
+    _trace_citations,
+)
 from app.main import create_app
 from app.tests.conftest import TEST_JWT_SECRET, TEST_PASSWORD, TEST_USERNAME
 from app.tests.fakes import FakeLLM
+from app.tests.tracing import RecordingTracer
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from passlib.context import CryptContext
 
 USER_PARTS = [{"type": "text", "text": "Hi there", "state": "done"}]
+
+
+class _TraceTool:
+    name = "trace_tool"
+    description = "Test tracing"
+    parameters: dict[str, Any] = {"type": "object", "properties": {}}
+
+    async def run(
+        self,
+        args: dict[str, Any],
+        citations: Citations,
+    ) -> ToolResult:
+        source = WebSource(
+            url="https://example.test/result",
+            title="Example result",
+            snippet="A compact result.",
+        )
+        cite_id = citations.add(source)
+        return ToolResult(
+            content=json.dumps({"ok": True, "cite_id": cite_id}),
+            source_parts=[source.to_source_part(cite_id)],
+            trace_data={"arguments": args, "result_count": 1},
+        )
+
+
+class _BrokenTracingClient:
+    def start_as_current_observation(self, **_kwargs: Any) -> None:
+        raise RuntimeError("Langfuse unavailable")
+
+    def flush(self) -> None:
+        raise RuntimeError("Langfuse unavailable")
+
+    def shutdown(self) -> None:
+        return
 
 
 def _auth_env(monkeypatch: pytest.MonkeyPatch, db_path: Path) -> None:
@@ -182,6 +226,169 @@ async def test_post_responses_streams_and_persists(
     assert '"delta":" world"' in response.text
     assert "data: [DONE]" in response.text
     detail = await _wait_until_idle(client, token, conversation_id)
+    assert _assistant_text(detail) == "Hello world"
+
+
+@pytest.mark.asyncio
+async def test_turn_trace_groups_generation_by_conversation_and_user(
+    client: AsyncClient,
+) -> None:
+    tracer = RecordingTracer()
+    set_tracer(tracer)
+    try:
+        token = await _token(client)
+        conversation_id = await _create_conversation(client, token)
+        response = await client.post(
+            "/v1/responses",
+            headers=_headers(token),
+            json={
+                "id": conversation_id,
+                "message": {
+                    "id": "msg_traced",
+                    "role": "user",
+                    "parts": USER_PARTS,
+                },
+                "stream": True,
+            },
+        )
+        assert response.status_code == 200
+        await _wait_until_idle(client, token, conversation_id)
+    finally:
+        set_tracer(NullTracer())
+
+    turns = [
+        observation
+        for observation in tracer.observations
+        if observation.name == "conversation.turn"
+    ]
+    assert len(turns) == 1
+    assert turns[0].session_id == conversation_id
+    assert turns[0].user_id == TEST_USERNAME
+    assert turns[0].input == "Hi there"
+    assert any(update.get("output") == "Hello world" for update in turns[0].updates)
+
+    generations = [
+        observation
+        for observation in tracer.observations
+        if observation.name == "llm.generation"
+    ]
+    assert len(generations) == 1
+    assert generations[0].parent == "conversation.turn"
+    assert generations[0].model == "fake-model"
+    assert generations[0].updates[-1]["usage_details"] == {
+        "input_tokens": 8,
+        "output_tokens": 2,
+        "total_tokens": 10,
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_span_is_nested_in_turn_with_compact_input_and_output() -> None:
+    tracer = RecordingTracer()
+    set_tracer(tracer)
+    llm = FakeLLM(
+        rounds=[
+            [
+                {
+                    "type": "tool-input-start",
+                    "toolCallId": "call_1",
+                    "toolName": "trace_tool",
+                },
+                {
+                    "type": "tool-input-available",
+                    "toolCallId": "call_1",
+                    "toolName": "trace_tool",
+                    "input": {"query": "find this"},
+                },
+                {
+                    "type": "response-metadata",
+                    "usage": {"input_tokens": 5, "output_tokens": 1},
+                    "finishReason": "completed",
+                    "model": "fake-model",
+                },
+                {"type": "finish"},
+            ],
+            [
+                {"type": "text-start", "id": "text_1"},
+                {"type": "text-delta", "id": "text_1", "delta": "Done"},
+                {"type": "text-end", "id": "text_1"},
+                {"type": "finish"},
+            ],
+        ]
+    )
+
+    async def emit(_event: dict[str, Any]) -> None:
+        return
+
+    try:
+        with tracer.trace(
+            "conversation.turn",
+            session_id="conv_trace",
+            user_id="alice",
+        ):
+            citations = Citations()
+            await _run_agent_loop(
+                input_items=[{"role": "user", "content": "Run the tool"}],
+                llm=llm,
+                tools=ToolRegistry([_TraceTool()]),
+                citations=citations,
+                accumulator=PartsAccumulator(),
+                emit=emit,
+            )
+            _trace_citations(citations)
+    finally:
+        set_tracer(NullTracer())
+
+    tool_spans = [
+        observation
+        for observation in tracer.observations
+        if observation.name == "tool.trace_tool"
+    ]
+    assert len(tool_spans) == 1
+    assert tool_spans[0].parent == "conversation.turn"
+    assert tool_spans[0].input == {"query": "find this"}
+    assert tool_spans[0].updates[-1]["output"] == {
+        "arguments": {"query": "find this"},
+        "result_count": 1,
+    }
+    citation_spans = [
+        observation
+        for observation in tracer.observations
+        if observation.name == "citations"
+    ]
+    assert len(citation_spans) == 1
+    assert citation_spans[0].parent == "conversation.turn"
+    assert citation_spans[0].updates[-1]["output"][0]["url"] == (
+        "https://example.test/result"
+    )
+
+
+@pytest.mark.asyncio
+async def test_tracing_failure_does_not_fail_streamed_generation(
+    client: AsyncClient,
+) -> None:
+    set_tracer(LangfuseTracer(_BrokenTracingClient()))
+    try:
+        token = await _token(client)
+        conversation_id = await _create_conversation(client, token)
+        response = await client.post(
+            "/v1/responses",
+            headers=_headers(token),
+            json={
+                "id": conversation_id,
+                "message": {
+                    "id": "msg_broken_trace",
+                    "role": "user",
+                    "parts": USER_PARTS,
+                },
+                "stream": True,
+            },
+        )
+        detail = await _wait_until_idle(client, token, conversation_id)
+    finally:
+        set_tracer(NullTracer())
+
+    assert response.status_code == 200
     assert _assistant_text(detail) == "Hello world"
 
 

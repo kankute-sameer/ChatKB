@@ -13,6 +13,7 @@ from app.core.llm.types import LLM, ChatMessage, StreamEvent
 from app.core.log import AppLogger, get_logger
 from app.core.tools import Tool, ToolRegistry
 from app.core.tools.protocol import ToolResult
+from app.core.tracing import Observation, compact_trace_value, get_tracer
 from app.features.agents.builder import ensure_builder_agent
 from app.features.agents.db import AgentRepository
 from app.features.agents.models import Agent
@@ -379,9 +380,12 @@ class ConversationService:
         await self.session.commit()
 
         buffer = self.store.create(response_id)
+        user_text = text_from_parts(body.message.parts)
         task = asyncio.create_task(
             run_generation(
                 conversation_id=conversation.id,
+                owner_id=owner_id,
+                user_text=user_text,
                 response_id=response_id,
                 assistant_message_id=assistant_message_id,
                 store=self.store,
@@ -395,7 +399,6 @@ class ConversationService:
         self.store.register_task(response_id, task)
 
         if conversation.title is None:
-            user_text = text_from_parts(body.message.parts)
             asyncio.create_task(
                 run_title_generation(
                     conversation_id=conversation.id,
@@ -524,6 +527,8 @@ class ConversationService:
 
 async def run_generation(
     conversation_id: str,
+    owner_id: str,
+    user_text: str,
     response_id: str,
     assistant_message_id: str,
     store: StreamStore,
@@ -532,11 +537,59 @@ async def run_generation(
     tools: ToolRegistry,
     log: AppLogger,
 ) -> None:
+    tracer = get_tracer()
+    accumulator = PartsAccumulator()
+    citations = Citations()
+    try:
+        with tracer.trace(
+            "conversation.turn",
+            input=user_text,
+            session_id=conversation_id,
+            user_id=owner_id,
+            metadata={
+                "agent_id": None,
+                "agent_name": None,
+                "build_session": False,
+                "response_id": response_id,
+            },
+        ) as turn:
+            try:
+                await _run_generation_inner(
+                    conversation_id=conversation_id,
+                    response_id=response_id,
+                    assistant_message_id=assistant_message_id,
+                    store=store,
+                    llm=llm,
+                    session_factory=session_factory,
+                    tools=tools,
+                    log=log,
+                    accumulator=accumulator,
+                    citations=citations,
+                    turn=turn,
+                )
+            finally:
+                _trace_citations(citations)
+                turn.update(output=text_from_parts(accumulator.parts))
+    finally:
+        tracer.schedule_flush()
+
+
+async def _run_generation_inner(
+    conversation_id: str,
+    response_id: str,
+    assistant_message_id: str,
+    store: StreamStore,
+    llm: LLM,
+    session_factory: async_sessionmaker[AsyncSession],
+    tools: ToolRegistry,
+    log: AppLogger,
+    accumulator: PartsAccumulator,
+    citations: Citations,
+    turn: Observation,
+) -> None:
     buffer = store.get(response_id)
     if buffer is None:
         return
-    accumulator = PartsAccumulator()
-    citations = Citations()
     try:
         async with session_factory() as session:
             repo = ConversationRepository(session)
@@ -546,6 +599,16 @@ async def run_generation(
                 buffer.finish()
                 store.mark_finished(response_id)
                 return
+            agent = await running_agent(session, conversation)
+            turn.update(
+                metadata={
+                    "agent_id": agent.id if agent is not None else None,
+                    "agent_name": agent.name if agent is not None else None,
+                    "target_agent_id": conversation.target_agent_id,
+                    "build_session": conversation.session_type == "build",
+                    "response_id": response_id,
+                }
+            )
             scoped_tools = await tools_for_conversation(
                 session, conversation, tools, session_factory
             )
@@ -636,18 +699,46 @@ async def _run_agent_loop(
     accumulator: PartsAccumulator,
     emit: Any,
 ) -> None:
+    tracer = get_tracer()
     tool_schemas = tools.openai_tools() or None
-    for _round in range(MAX_TOOL_ROUNDS):
+    for round_index in range(MAX_TOOL_ROUNDS):
         await emit({"type": "start-step"})
         pending: list[StreamEvent] = []
-        async for event in llm.stream(input_items, tools=tool_schemas):
-            event_type = event.get("type")
-            if event_type in TERMINAL_EVENT_TYPES:
-                continue
-            accumulator.apply(event)
-            await emit(dict(event))
-            if event_type == "tool-input-available":
-                pending.append(event)
+        completion: list[str] = []
+        usage: dict[str, int] = {}
+        finish_reason = "completed"
+        response_model = llm.model_name
+        with tracer.generation(
+            "llm.generation",
+            model=response_model,
+            input=_compact_messages(input_items),
+            metadata={"round": round_index + 1},
+        ) as generation:
+            async for event in llm.stream(input_items, tools=tool_schemas):
+                event_type = event.get("type")
+                if event_type == "response-metadata":
+                    usage = event.get("usage") or {}
+                    finish_reason = str(event.get("finishReason") or finish_reason)
+                    response_model = str(event.get("model") or response_model)
+                    continue
+                if event_type in TERMINAL_EVENT_TYPES:
+                    continue
+                if event_type == "text-delta":
+                    completion.append(str(event.get("delta") or ""))
+                accumulator.apply(event)
+                await emit(dict(event))
+                if event_type == "tool-input-available":
+                    pending.append(event)
+            generation.update(
+                output="".join(completion),
+                model=response_model,
+                usage_details=usage,
+                metadata={
+                    "round": round_index + 1,
+                    "finish_reason": finish_reason,
+                    "tool_calls": len(pending),
+                },
+            )
         if not pending:
             await emit({"type": "finish-step"})
             await emit({"type": "finish"})
@@ -696,14 +787,73 @@ async def _execute_tool(
     if not isinstance(args, dict):
         args = {}
     tool = tools.get(name)
-    if tool is None:
-        return ToolResult(content=json.dumps({"error": f"unknown tool: {name}"}))
+    tracer = get_tracer()
+    with tracer.span(
+        f"tool.{name or 'unknown'}",
+        input=args,
+        as_type="tool",
+    ) as span:
+        if tool is None:
+            result = ToolResult(
+                content=json.dumps({"error": f"unknown tool: {name}"})
+            )
+        else:
+            try:
+                result = await tool.run(args, citations)
+            except Exception as exc:
+                logger.warning("Tool %s failed: %s", name, exc)
+                label = "search failed" if name == "web_search" else f"{name} failed"
+                result = ToolResult(
+                    content=json.dumps({"error": f"{label}: {exc}"})
+                )
+        span.update(
+            output=result.trace_data or _compact_tool_output(result.content),
+            metadata={"source_count": len(result.source_parts)},
+        )
+        return result
+
+
+def _compact_messages(messages: Sequence[ChatMessage]) -> list[dict[str, Any]]:
+    compacted: list[dict[str, Any]] = []
+    for item in messages[-12:]:
+        compacted.append(
+            {
+                key: compact_trace_value(value)
+                for key, value in item.items()
+                if key in {"role", "content", "type", "name", "arguments", "output"}
+            }
+        )
+    return compacted
+
+
+def _compact_tool_output(content: str) -> Any:
     try:
-        return await tool.run(args, citations)
+        return compact_trace_value(json.loads(content))
+    except (json.JSONDecodeError, TypeError):
+        return compact_trace_value(content)
+
+
+def _trace_citations(citations: Citations) -> None:
+    try:
+        sources = citations.source_parts()
+        if not sources:
+            return
+        mappings = [
+            {
+                "cite_id": source.get("sourceId"),
+                "filename": source.get("filename"),
+                "url": source.get("url"),
+                "page": source.get("page"),
+            }
+            for source in sources
+        ]
+        with get_tracer().span(
+            "citations",
+            input={"count": len(mappings)},
+        ) as span:
+            span.update(output=mappings)
     except Exception as exc:
-        logger.warning("Tool %s failed: %s", name, exc)
-        label = "search failed" if name == "web_search" else f"{name} failed"
-        return ToolResult(content=json.dumps({"error": f"{label}: {exc}"}))
+        logger.warning("Citation tracing failed: %s", exc)
 
 
 async def tools_for_conversation(

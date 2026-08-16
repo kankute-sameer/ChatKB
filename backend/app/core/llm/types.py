@@ -26,6 +26,9 @@ class StreamEvent(TypedDict, total=False):
     inputTextDelta: str
     input: dict[str, Any]
     output: Any
+    usage: dict[str, int]
+    finishReason: str
+    model: str
     sourceId: str
     url: str
     title: str
@@ -34,6 +37,9 @@ class StreamEvent(TypedDict, total=False):
 
 
 class LLM(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
     def stream(
         self,
         messages: Sequence[ChatMessage],

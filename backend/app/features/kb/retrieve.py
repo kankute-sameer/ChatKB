@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.tracing import get_tracer
 from app.features.kb.ingestion.embed import QUERY_TASK_TYPE, Embedder
 
 SEARCH_LIMIT = 30
@@ -42,24 +43,51 @@ async def hybrid_search(
     if not collection_ids or k <= 0:
         return []
 
-    vectors = await embedder.embed([query], task_type=QUERY_TASK_TYPE)
-    query_vector = vectors[0]
+    tracer = get_tracer()
+    with tracer.span(
+        "retrieval",
+        input={"query": query, "collection_ids": collection_ids, "limit": k},
+        as_type="retriever",
+    ) as retrieval:
+        vectors = await embedder.embed([query], task_type=QUERY_TASK_TYPE)
+        query_vector = vectors[0]
 
-    async def vector_search() -> list[ChunkHit]:
-        return await _vector_search(db, collection_ids, query_vector)
+        async def vector_search() -> list[ChunkHit]:
+            with tracer.span(
+                "retrieval.vector",
+                as_type="retriever",
+            ) as vector_span:
+                hits = await _vector_search(db, collection_ids, query_vector)
+                vector_span.update(output=_trace_hits(hits))
+                return hits
 
-    async def lexical_search() -> list[ChunkHit]:
-        if session_factory is None:
-            return await _lexical_search(db, collection_ids, query)
-        async with session_factory() as session:
-            return await _lexical_search(session, collection_ids, query)
+        async def lexical_search() -> list[ChunkHit]:
+            with tracer.span(
+                "retrieval.lexical",
+                as_type="retriever",
+            ) as lexical_span:
+                if session_factory is None:
+                    hits = await _lexical_search(db, collection_ids, query)
+                else:
+                    async with session_factory() as session:
+                        hits = await _lexical_search(session, collection_ids, query)
+                lexical_span.update(output=_trace_hits(hits))
+                return hits
 
-    # Independent sessions let PostgreSQL execute both retrieval halves concurrently.
-    vector_hits, lexical_hits = await asyncio.gather(
-        vector_search(),
-        lexical_search(),
-    )
-    return reciprocal_rank_fusion([vector_hits, lexical_hits], limit=k)
+        # Independent sessions let PostgreSQL execute both halves concurrently.
+        vector_hits, lexical_hits = await asyncio.gather(
+            vector_search(),
+            lexical_search(),
+        )
+        fused = reciprocal_rank_fusion([vector_hits, lexical_hits], limit=k)
+        retrieval.update(
+            output={
+                "vector": _trace_hits(vector_hits),
+                "lexical": _trace_hits(lexical_hits),
+                "fused": _trace_hits(fused),
+            }
+        )
+        return fused
 
 
 def reciprocal_rank_fusion(
@@ -100,7 +128,8 @@ async def _vector_search(
         """
         SELECT c.id AS chunk_id, c.file_id, c.collection_id, c.text,
                c.section_header, c.page, c.anchor, c.bbox, f.filename,
-               f.mime_type
+               f.mime_type,
+               1 - (c.embedding <=> CAST(:qvec AS vector)) AS score
         FROM kb_chunks AS c
         JOIN kb_files AS f ON f.id = c.file_id
         WHERE c.collection_id IN :collection_ids
@@ -128,7 +157,11 @@ async def _lexical_search(
         """
         SELECT c.id AS chunk_id, c.file_id, c.collection_id, c.text,
                c.section_header, c.page, c.anchor, c.bbox, f.filename,
-               f.mime_type
+               f.mime_type,
+               ts_rank(
+                   c.text_tsv,
+                   websearch_to_tsquery('simple', :query)
+               ) AS score
         FROM kb_chunks AS c
         JOIN kb_files AS f ON f.id = c.file_id
         WHERE c.collection_id IN :collection_ids
@@ -166,5 +199,27 @@ def _row_to_hit(row: Any) -> ChunkHit:
         bbox=[float(value) for value in bbox] if bbox is not None else None,
         filename=str(row["filename"]),
         mime_type=str(row["mime_type"]),
-        score=0.0,
+        score=float(row.get("score") or 0.0),
     )
+
+
+def _trace_hits(hits: Sequence[ChunkHit]) -> list[dict[str, object]]:
+    return [
+        {
+            "chunk_id": hit.chunk_id,
+            "file_id": hit.file_id,
+            "filename": hit.filename,
+            "section_header": hit.section_header,
+            "page": hit.page,
+            "score": round(hit.score, 6),
+            "text": _trace_snippet(hit.text),
+        }
+        for hit in hits[:10]
+    ]
+
+
+def _trace_snippet(text: str, limit: int = 500) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "…"

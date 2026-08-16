@@ -7,10 +7,12 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.core.ids import new_id
+from app.core.tracing import NullTracer, set_tracer
 from app.features.kb.ingestion.extract import Block, ExtractedImage, ProseExtraction
 from app.features.kb.ingestion.pipeline import run_ingestion
 from app.features.kb.models import Collection, KbChunk, KbFile
 from app.tests.fakes import FakeEmbedder, FakeLLM, FakeStorage
+from app.tests.tracing import RecordingTracer
 
 
 def _block(
@@ -111,6 +113,7 @@ async def test_pipeline_persists_chunks_and_marks_ready(
     pdf_path.write_bytes(b"%PDF-1.4")
     embedder = FakeEmbedder()
     storage = FakeStorage()
+    tracer = RecordingTracer()
 
     def fake_extract(
         _path: Path,
@@ -137,17 +140,21 @@ async def test_pipeline_persists_chunks_and_marks_ready(
 
     monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract", fake_extract)
 
-    await run_ingestion(
-        file_id=file_id,
-        file_path=pdf_path,
-        session_factory=app.state.session_factory,
-        llm=fake_llm,
-        embedder=embedder,
-        storage=storage,
-        owner_id="alice",
-        ingestion_model="test-model",
-        image_describer=fake_llm,
-    )
+    set_tracer(tracer)
+    try:
+        await run_ingestion(
+            file_id=file_id,
+            file_path=pdf_path,
+            session_factory=app.state.session_factory,
+            llm=fake_llm,
+            embedder=embedder,
+            storage=storage,
+            owner_id="alice",
+            ingestion_model="test-model",
+            image_describer=fake_llm,
+        )
+    finally:
+        set_tracer(NullTracer())
 
     async with app.state.session_factory() as session:
         row = await session.get(KbFile, file_id)
@@ -188,3 +195,17 @@ async def test_pipeline_persists_chunks_and_marks_ready(
     assert storage.puts == [
         (f"alice/{file_id}.pdf", b"%PDF-1.4", "application/pdf")
     ]
+    ingestion = [
+        item for item in tracer.observations if item.name == "kb.ingestion"
+    ]
+    assert len(ingestion) == 1
+    assert ingestion[0].session_id == collection_id
+    assert ingestion[0].user_id == "alice"
+    assert {
+        "store",
+        "extract",
+        "describe_images",
+        "chunk",
+        "index_md",
+        "embed",
+    }.issubset({item.name for item in tracer.observations})

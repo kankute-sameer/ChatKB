@@ -83,6 +83,7 @@ class KbSearchTool:
             )
 
         results: list[dict[str, object]] = []
+        traced_hits: list[dict[str, object]] = []
         source_parts: list[dict[str, Any]] = []
         known = citations.known_ids()
         for hit in hits:
@@ -102,6 +103,16 @@ class KbSearchTool:
             if is_table_schema:
                 tool_row["schema"] = hit.text[:3000]
             results.append(tool_row)
+            traced_hits.append(
+                {
+                    "chunk_id": hit.chunk_id,
+                    "file_id": hit.file_id,
+                    "filename": hit.filename,
+                    "score": hit.score,
+                    "page": hit.page,
+                    "snippet": _snippet(hit.text),
+                }
+            )
             if cite_id not in known:
                 source_parts.append(source.to_source_part(cite_id))
                 known.add(cite_id)
@@ -109,6 +120,11 @@ class KbSearchTool:
         return ToolResult(
             content=_capped_json(results),
             source_parts=source_parts,
+            trace_data={
+                "query": query,
+                "result_count": len(traced_hits),
+                "hits": traced_hits,
+            },
         )
 
 
@@ -324,6 +340,13 @@ def _query_result(
     return ToolResult(
         content=json.dumps(payload, default=str),
         source_parts=source_parts,
+        trace_data={
+            "sql": sql,
+            "row_count": len(payload_rows),
+            "columns": payload_columns,
+            "sample_rows": payload_rows[:3],
+            "truncated": truncated,
+        },
     )
 
 

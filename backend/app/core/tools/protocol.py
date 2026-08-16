@@ -12,6 +12,7 @@ class ToolResult:
 
     content: str
     source_parts: list[dict[str, Any]] = field(default_factory=list)
+    trace_data: dict[str, Any] | None = None
 
 
 class Tool(Protocol):

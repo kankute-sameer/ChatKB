@@ -13,6 +13,7 @@ from app.core.llm.client import LLMClient
 from app.core.log import configure_logging
 from app.core.storage import S3Storage
 from app.core.tools import ToolRegistry
+from app.core.tracing import NullTracer, create_tracer, set_tracer
 from app.features.agents import models as agent_models  # noqa: F401
 from app.features.agents.router import router as agents_router
 from app.features.auth.router import router as auth_router
@@ -38,6 +39,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     embedder = GeminiEmbedder.from_settings(settings)
     storage = S3Storage.from_settings(settings)
     await storage.start()
+    tracer = create_tracer(settings, log=log)
+    set_tracer(tracer)
     tools = ToolRegistry(
         [
             WebSearchTool(exa),
@@ -63,6 +66,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await llm.aclose()
         await exa.aclose()
         await storage.aclose()
+        await tracer.shutdown()
+        set_tracer(NullTracer())
         await engine.dispose()
 
 

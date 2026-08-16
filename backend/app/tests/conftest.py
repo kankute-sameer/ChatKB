@@ -20,6 +20,9 @@ def aws_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.setenv("S3_BUCKET", "test-chatkb-bucket")
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "")
+    monkeypatch.setenv("LANGFUSE_HOST", "")
 
 
 @pytest.fixture

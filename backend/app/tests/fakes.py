@@ -32,6 +32,10 @@ class FakeLLM:
         self.continue_event = asyncio.Event()
         self.continue_event.set()
 
+    @property
+    def model_name(self) -> str:
+        return "fake-model"
+
     async def stream(
         self,
         messages: Sequence[ChatMessage],
@@ -56,6 +60,12 @@ class FakeLLM:
             await self.continue_event.wait()
             yield StreamEvent(type="text-delta", id="text_test", delta=chunk)
         yield StreamEvent(type="text-end", id="text_test")
+        yield StreamEvent(
+            type="response-metadata",
+            usage={"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
+            finishReason="completed",
+            model="fake-model",
+        )
         yield StreamEvent(type="finish-step")
         yield StreamEvent(type="finish")
 

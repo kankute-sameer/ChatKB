@@ -82,6 +82,10 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
+    @property
+    def model_name(self) -> str:
+        return self._model
+
     def _body(
         self,
         messages: Sequence[ChatMessage],
@@ -299,9 +303,37 @@ class _ResponsesMapper:
             return self._on_tool_delta(payload)
         if event_type == "response.function_call_arguments.done":
             return self._on_tool_done(payload)
+        if event_type == "response.completed":
+            return [self._response_metadata(payload)]
         if event_type in {"response.failed", "error"}:
             return [StreamEvent(type="error", errorText=_error_text(payload))]
         return []
+
+    def _response_metadata(self, payload: dict[str, Any]) -> StreamEvent:
+        response = payload.get("response")
+        if not isinstance(response, dict):
+            response = {}
+        raw_usage = response.get("usage")
+        usage: dict[str, int] = {}
+        if isinstance(raw_usage, dict):
+            for source, target in (
+                ("input_tokens", "input_tokens"),
+                ("output_tokens", "output_tokens"),
+                ("total_tokens", "total_tokens"),
+            ):
+                value = raw_usage.get(source)
+                if isinstance(value, int):
+                    usage[target] = value
+        status = str(response.get("status") or "completed")
+        incomplete = response.get("incomplete_details")
+        if isinstance(incomplete, dict) and incomplete.get("reason"):
+            status = str(incomplete["reason"])
+        return StreamEvent(
+            type="response-metadata",
+            usage=usage,
+            finishReason=status,
+            model=str(response.get("model") or ""),
+        )
 
     def close(self) -> list[StreamEvent]:
         events: list[StreamEvent] = []

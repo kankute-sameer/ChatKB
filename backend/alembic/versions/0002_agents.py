@@ -9,13 +9,12 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB
-
 from app.features.agents.builder import (
     BUILDER_AGENT_ID,
     BUILDER_INSTRUCTIONS,
     BUILDER_OWNER_ID,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = "0002_agents"
 down_revision: str | None = "0001_conversations"

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     aws_secret_access_key: str
     aws_region: str
     s3_bucket: str
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = ""
     log_level: str = "DEBUG"
 
     @field_validator("auth_users", mode="before")

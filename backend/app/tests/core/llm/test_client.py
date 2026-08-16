@@ -194,3 +194,33 @@ def test_mapper_keeps_function_name_when_done_event_omits_it() -> None:
     assert available[0]["toolName"] == "web_search"
     assert available[0]["toolCallId"] == "call_1"
     assert available[0]["input"] == {"query": "latest news"}
+
+
+def test_mapper_emits_usage_and_finish_metadata() -> None:
+    events = _ResponsesMapper().handle(
+        {
+            "type": "response.completed",
+            "response": {
+                "model": "gpt-5-mini",
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 120,
+                    "output_tokens": 30,
+                    "total_tokens": 150,
+                },
+            },
+        }
+    )
+
+    assert events == [
+        {
+            "type": "response-metadata",
+            "model": "gpt-5-mini",
+            "finishReason": "completed",
+            "usage": {
+                "input_tokens": 120,
+                "output_tokens": 30,
+                "total_tokens": 150,
+            },
+        }
+    ]

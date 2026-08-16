@@ -4,9 +4,11 @@ from typing import Any
 
 import pytest
 
+from app.core.tracing import NullTracer, set_tracer
 from app.features.kb.ingestion.embed import QUERY_TASK_TYPE
 from app.features.kb.retrieve import ChunkHit, hybrid_search, reciprocal_rank_fusion
 from app.tests.fakes import FakeEmbedder
+from app.tests.tracing import RecordingTracer
 
 
 def _hit(chunk_id: str, collection_id: str = "col_one") -> ChunkHit:
@@ -76,12 +78,17 @@ class _Db:
 async def test_hybrid_search_is_scoped_and_uses_query_embedding() -> None:
     db = _Db()
     embedder = FakeEmbedder()
-    hits = await hybrid_search(
-        "Sameer",
-        ["col_allowed"],
-        db=db,  # type: ignore[arg-type]
-        embedder=embedder,
-    )
+    tracer = RecordingTracer()
+    set_tracer(tracer)
+    try:
+        hits = await hybrid_search(
+            "Sameer",
+            ["col_allowed"],
+            db=db,  # type: ignore[arg-type]
+            embedder=embedder,
+        )
+    finally:
+        set_tracer(NullTracer())
 
     assert {hit.collection_id for hit in hits} == {"col_allowed"}
     assert embedder.task_types == [QUERY_TASK_TYPE]
@@ -91,6 +98,14 @@ async def test_hybrid_search_is_scoped_and_uses_query_embedding() -> None:
     assert isinstance(vector_params["qvec"], list)
     lexical_sql = next(sql for sql, _ in db.calls if "text_tsv" in sql)
     assert "websearch_to_tsquery('simple'" in lexical_sql
+    spans = {item.name: item for item in tracer.observations}
+    assert {"retrieval", "retrieval.vector", "retrieval.lexical"} <= spans.keys()
+    assert spans["retrieval.vector"].parent == "retrieval"
+    assert spans["retrieval.lexical"].parent == "retrieval"
+    assert "fused" in spans["retrieval"].updates[-1]["output"]
+    vector_output = spans["retrieval.vector"].updates[-1]["output"]
+    assert vector_output[0]["text"] == "vector"
+    assert vector_output[0]["filename"] == "resume.pdf"
 
 
 @pytest.mark.asyncio
