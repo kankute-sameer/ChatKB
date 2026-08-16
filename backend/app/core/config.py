@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from typing import cast
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +19,10 @@ class Settings(BaseSettings):
     auth_users: dict[str, str]
     cors_origins: list[str] = ["http://localhost:5173"]
     database_url: str = "postgresql+asyncpg://chatkb:chatkb@127.0.0.1:5433/chatkb"
-    llm_api_key: str = ""
+    llm_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY"),
+    )
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-5.6-luna"
     llm_title_model: str = "gpt-5.6-luna"

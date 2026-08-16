@@ -19,6 +19,8 @@ class Base(DeclarativeBase):
 
 
 def create_engine(url: str) -> AsyncEngine:
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     connect_args: dict[str, object] = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False

@@ -27,6 +27,7 @@ x-backend-environment: &backend-environment
   LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
   LANGFUSE_HOST: ${LANGFUSE_HOST:-}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  ROOT_PATH: /api
 
 services:
   postgres:

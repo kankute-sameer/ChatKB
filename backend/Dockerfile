@@ -22,6 +22,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY --chmod=755 entrypoint.sh ./entrypoint.sh
 RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 10001 chatkb \
@@ -32,4 +33,5 @@ USER chatkb
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--root-path", "/api", "--proxy-headers", "--forwarded-allow-ips=*"]
+# entrypoint.sh intentionally starts one uvicorn process for in-memory streams.
+CMD ["./entrypoint.sh"]
