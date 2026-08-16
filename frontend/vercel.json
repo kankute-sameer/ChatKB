@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://chatkb-production.up.railway.app/:path*"
+    }
+  ]
+}
