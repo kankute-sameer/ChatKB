@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { ChatView, ComposerStartDefault } from "@/components/ChatView";
+import { ChatView } from "@/components/ChatView";
 import { ResourceViewer } from "@/components/ResourceViewer";
 import type { DocumentCitationSource } from "@/components/ai-elements/inline-citation";
 import { getToken } from "@/lib/api";
@@ -74,7 +74,6 @@ export function ConversationChat({
   placeholder = "Ask anything...",
   header,
   showTitle = true,
-  showMic = true,
   composerStart,
   composerFooter,
   onSettled,
@@ -84,7 +83,6 @@ export function ConversationChat({
   placeholder?: string;
   header?: ReactNode;
   showTitle?: boolean;
-  showMic?: boolean;
   composerStart?: ReactNode;
   composerFooter?: ReactNode;
   onSettled?: () => void;
@@ -254,11 +252,7 @@ export function ConversationChat({
           header={header}
           messages={displayMessages}
           placeholder={placeholder}
-          showMic={showMic}
-          composerStart={
-            composerStart ??
-            (agent ? <AgentChip agent={agent} /> : <ComposerStartDefault />)
-          }
+          composerStart={composerStart ?? (agent ? <AgentChip agent={agent} /> : undefined)}
           composerFooter={composerFooter}
           onSubmit={(text) => {
             sessionStorage.removeItem(stoppedStorageKey(conversation.id));

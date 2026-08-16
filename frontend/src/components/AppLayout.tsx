@@ -1,8 +1,11 @@
 import { Outlet, useLocation } from "react-router-dom";
+import { ProductTourDialog } from "@/components/ProductTourDialog";
 import { Sidebar } from "@/components/Sidebar";
+import { useAuth } from "@/features/auth/AuthProvider";
 
 export function AppLayout() {
   const location = useLocation();
+  const { productTourOpen, closeProductTour } = useAuth();
 
   return (
     <div className="flex h-full bg-background">
@@ -12,6 +15,7 @@ export function AppLayout() {
           <Outlet />
         </div>
       </main>
+      <ProductTourDialog open={productTourOpen} onClose={closeProductTour} />
     </div>
   );
 }

@@ -56,6 +56,26 @@ function markdownComponents(
       return <code className="rounded bg-gray-50 px-1">{children}</code>;
     },
     pre: ({ children }) => <pre className="mb-3 last:mb-0">{children}</pre>,
+    table: ({ children }) => (
+      <div className="mb-3 overflow-x-auto rounded-lg border border-border last:mb-0">
+        <table className="w-full border-collapse font-sans text-nav font-ui text-ink">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children }) => (
+      <thead className="bg-gray-100 text-left font-medium">{children}</thead>
+    ),
+    tbody: ({ children }) => <tbody>{children}</tbody>,
+    tr: ({ children }) => (
+      <tr className="border-b border-border last:border-b-0">{children}</tr>
+    ),
+    th: ({ children }) => (
+      <th className="px-4 py-3 text-left font-medium align-top">{children}</th>
+    ),
+    td: ({ children }) => (
+      <td className="px-4 py-3 align-top">{children}</td>
+    ),
     a: ({ href, children }) => {
       const chip = citeChip(href, byId, onOpenDocument);
       if (chip !== undefined) return chip;

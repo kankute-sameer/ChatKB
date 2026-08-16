@@ -25,6 +25,42 @@ class ExperienceFeedbackResponse(BaseModel):
     submitted: bool = True
 
 
+class ProductOpenedResponse(BaseModel):
+    logged: bool = True
+
+
+@router.post("/v1/product/opened", response_model=ProductOpenedResponse)
+async def log_product_opened(
+    owner_id: Annotated[str, Depends(get_current_user)],
+) -> ProductOpenedResponse:
+    event_id = new_id("event")
+    tracer = get_tracer()
+    metadata = {
+        "event_id": event_id,
+        "user_id": owner_id,
+        "user_name": owner_id,
+        "source": "login",
+    }
+    with tracer.trace(
+        "product.opened",
+        input={"source": "login"},
+        user_id=owner_id,
+        trace_id_seed=event_id,
+        metadata=metadata,
+    ) as observation:
+        observation.update(output={"opened": True})
+    tracer.score_trace(
+        event_id,
+        name="product-opened",
+        value=True,
+        data_type="BOOLEAN",
+        score_id_seed=f"product-opened:{event_id}",
+        metadata=metadata,
+    )
+    tracer.schedule_flush()
+    return ProductOpenedResponse()
+
+
 @router.post("/v1/feedback", response_model=ExperienceFeedbackResponse)
 async def submit_feedback(
     body: ExperienceFeedbackRequest,

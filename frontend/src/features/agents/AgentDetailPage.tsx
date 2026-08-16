@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, X } from "lucide-react";
-import { ComposerStartDefault } from "@/components/ChatView";
 import { DetailPanel } from "@/components/DetailPanel";
 import { MarkdownBody } from "@/components/MarkdownBody";
 import { Button } from "@/components/ui/button";
@@ -271,7 +270,6 @@ export function AgentDetailPage() {
                 </Button>
               </div>
             }
-            composerStart={<ComposerStartDefault />}
             composerFooter={composerFooter}
             onSettled={() => {
               void refreshAgent();

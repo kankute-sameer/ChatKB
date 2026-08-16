@@ -41,7 +41,7 @@ export function LoginPage() {
           className="flex w-full max-w-login flex-col items-center gap-6"
           onSubmit={onSubmit}
         >
-          <Mark />
+          <img src="/favicon.svg" alt="" className="size-8" />
           <h1 className="text-center font-serif text-2xl font-normal text-ink">
             Log into your account
           </h1>
@@ -82,22 +82,5 @@ export function LoginPage() {
         </p>
       </div>
     </div>
-  );
-}
-
-function Mark() {
-  return (
-    <svg
-      viewBox="0 0 32 32"
-      className="size-8 text-foreground"
-      aria-hidden="true"
-    >
-      <circle cx="16" cy="16" r="3.5" fill="currentColor" />
-      <g fill="none" stroke="currentColor" strokeWidth="1.5">
-        <ellipse cx="16" cy="16" rx="11" ry="5.5" />
-        <ellipse cx="16" cy="16" rx="11" ry="5.5" transform="rotate(60 16 16)" />
-        <ellipse cx="16" cy="16" rx="11" ry="5.5" transform="rotate(120 16 16)" />
-      </g>
-    </svg>
   );
 }

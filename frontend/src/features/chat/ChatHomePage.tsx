@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Composer, ComposerStartDefault } from "@/components/ChatView";
+import { Composer } from "@/components/ChatView";
 import { LandingHero } from "@/components/LandingHero";
 import {
   createConversation,
@@ -21,7 +21,6 @@ export function ChatHomePage() {
       composer={
         <Composer
           placeholder="Ask anything..."
-          start={<ComposerStartDefault />}
           onSubmit={(text) => {
             void onSubmit(text);
           }}

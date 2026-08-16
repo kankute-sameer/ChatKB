@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Composer, ComposerStartDefault } from "@/components/ChatView";
+import { Composer } from "@/components/ChatView";
 import { LandingHero } from "@/components/LandingHero";
 import { appearanceClassName } from "@/design/tokens";
 import { getAgent, type Agent } from "@/lib/agents";
@@ -70,7 +70,6 @@ export function AgentChatPage() {
       composer={
         <Composer
           placeholder="Ask anything..."
-          start={<ComposerStartDefault />}
           onSubmit={(text) => {
             void onSubmit(text);
           }}

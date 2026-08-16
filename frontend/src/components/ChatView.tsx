@@ -6,8 +6,6 @@ import {
   Check,
   Copy,
   FileText,
-  Mic,
-  Plus,
   Square,
   ThumbsDown,
   ThumbsUp,
@@ -107,7 +105,6 @@ interface ComposerProps {
   initialValue?: string;
   autoFocus?: boolean;
   start?: ReactNode;
-  showMic?: boolean;
   onSubmit?: (text: string) => void;
   onStop?: () => void;
   isStreaming?: boolean;
@@ -119,7 +116,6 @@ export function Composer({
   initialValue = "",
   autoFocus = false,
   start,
-  showMic = true,
   onSubmit,
   onStop,
   isStreaming = false,
@@ -170,11 +166,6 @@ export function Composer({
       <div className="mt-3 flex items-center justify-between">
         <div className="flex items-center gap-1">{start}</div>
         <div className="flex items-center gap-1">
-          {showMic ? (
-            <Button type="button" variant="ghost" size="icon" aria-label="Voice">
-              <Mic className="size-icon text-ink-muted" />
-            </Button>
-          ) : null}
           {isStreaming ? (
             <Button
               type="button"
@@ -216,7 +207,6 @@ interface ChatViewProps {
   layout?: "landing" | "thread";
   composerStart?: ReactNode;
   composerFooter?: ReactNode;
-  showMic?: boolean;
   onSubmit?: (text: string) => void;
   onStop?: () => void;
   isStreaming?: boolean;
@@ -234,7 +224,6 @@ export function ChatView({
   layout = "thread",
   composerStart,
   composerFooter,
-  showMic = true,
   onSubmit,
   onStop,
   isStreaming,
@@ -246,7 +235,6 @@ export function ChatView({
     <Composer
       placeholder={placeholder}
       start={composerStart}
-      showMic={showMic}
       onSubmit={onSubmit}
       onStop={onStop}
       isStreaming={isStreaming}
@@ -662,10 +650,3 @@ function AssistantTurn({
   );
 }
 
-export function ComposerStartDefault() {
-  return (
-    <Button type="button" variant="ghost" size="icon" aria-label="Add">
-      <Plus className="size-icon text-ink" />
-    </Button>
-  );
-}

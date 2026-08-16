@@ -64,7 +64,6 @@ export function AgentsGalleryPage() {
         <Composer
           initialValue="Create an agent to "
           autoFocus
-          showMic={false}
           disabled={creating}
           onSubmit={(text) => {
             void onCreate(text);

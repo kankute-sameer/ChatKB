@@ -361,6 +361,45 @@ async def test_sidebar_feedback_creates_langfuse_trace_and_text_score(
 
 
 @pytest.mark.asyncio
+async def test_login_product_opened_event_is_logged_to_langfuse(
+    client: AsyncClient,
+) -> None:
+    tracer = RecordingTracer()
+    set_tracer(tracer)
+    try:
+        token = await _token(client)
+        response = await client.post(
+            "/v1/product/opened",
+            headers=_headers(token),
+        )
+        assert response.status_code == 200
+        assert response.json() == {"logged": True}
+    finally:
+        set_tracer(NullTracer())
+
+    opened = [
+        observation
+        for observation in tracer.observations
+        if observation.name == "product.opened"
+    ]
+    assert len(opened) == 1
+    assert opened[0].trace_id_seed is not None
+    assert opened[0].user_id == TEST_USERNAME
+    assert opened[0].metadata["source"] == "login"
+    assert tracer.scores == [
+        {
+            "trace_id_seed": opened[0].trace_id_seed,
+            "name": "product-opened",
+            "value": True,
+            "data_type": "BOOLEAN",
+            "score_id_seed": f"product-opened:{opened[0].trace_id_seed}",
+            "comment": None,
+            "metadata": opened[0].metadata,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_span_is_nested_in_turn_with_compact_input_and_output() -> None:
     tracer = RecordingTracer()
     set_tracer(tracer)
