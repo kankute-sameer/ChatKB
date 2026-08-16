@@ -10,6 +10,8 @@ from app.core.config import Settings
 class Storage(Protocol):
     async def put(self, key: str, data: bytes, content_type: str) -> None: ...
 
+    async def get(self, key: str) -> bytes: ...
+
     async def presigned_get_url(self, key: str, expires_in: int = 300) -> str: ...
 
     async def delete(self, key: str) -> None: ...
@@ -69,6 +71,15 @@ class S3Storage:
             Body=data,
             ContentType=content_type,
         )
+
+    async def get(self, key: str) -> bytes:
+        client = self._require_client()
+        response = await client.get_object(Bucket=self.bucket, Key=key)
+        body = response["Body"]
+        try:
+            return bytes(await body.read())
+        finally:
+            body.close()
 
     async def presigned_get_url(self, key: str, expires_in: int = 300) -> str:
         client = self._require_client()

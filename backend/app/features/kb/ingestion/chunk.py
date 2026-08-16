@@ -16,10 +16,11 @@ class Chunk:
     chunk_index: int
     text: str
     section_header: str | None
-    page: int
+    page: int | None
     anchor: str
-    bbox: list[float]
+    bbox: list[float] | None
     block_type: str
+    metadata: dict[str, object] | None = None
 
 
 def estimate_tokens(text: str) -> int:
@@ -61,7 +62,11 @@ def chunk_blocks(
                     section_header=current_header,
                     page=block["page"],
                     anchor=anchor,
-                    bbox=list(block["bbox"]),
+                    bbox=(
+                        list(block["bbox"])
+                        if block["bbox"] is not None
+                        else None
+                    ),
                     block_type=block["block_type"],
                 )
             )

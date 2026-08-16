@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import new_id
 from app.features.agents.appearance import random_appearance
+from app.features.agents.db import AgentRepository
 from app.features.agents.models import Agent
-from app.features.agents.repository import AgentRepository
 from app.features.agents.schemas import (
     AgentCollectionsUpdate,
     AgentCreateRequest,
@@ -14,7 +14,7 @@ from app.features.agents.schemas import (
     AgentResponse,
     AgentUpdateRequest,
 )
-from app.features.kb.repository import KbRepository
+from app.features.kb.db import KbRepository
 from app.features.kb.schemas import CollectionResponse
 
 

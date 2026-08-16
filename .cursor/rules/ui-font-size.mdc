@@ -1,0 +1,22 @@
+---
+description: Default UI font size matches the sidebar (text-nav / 16px)
+globs: frontend/**/*.{tsx,ts,css}
+alwaysApply: true
+---
+
+# UI font size default
+
+Sidebar body text uses `text-nav` (16px / Lexend). That is the **minimum** size for UI work in this app.
+
+When adding or changing UI:
+
+- Use `font-sans text-nav font-ui` for labels, buttons, inputs, table headers/cells, placeholders, helper text, dialog body, and nav-like copy.
+- Do **not** default to `text-sm` (14px) or `text-xs` (12px) for normal UI text.
+- Prefer matching existing sidebar patterns over inventing smaller type.
+- `text-sm` / `text-xs` only for rare dense metadata when the user explicitly asks for smaller type.
+
+Token reference (`frontend/src/design/tokens.ts`):
+
+- `nav`: 16px — default UI
+- `base`: 16px — same size, slightly taller line-height
+- `sm` / `xs`: too small for default UI; avoid

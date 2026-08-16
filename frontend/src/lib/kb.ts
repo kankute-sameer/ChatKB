@@ -90,8 +90,12 @@ export function deleteFile(
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024) {
+    const kb = n / 1024;
+    return `${kb >= 10 ? Math.round(kb) : Number(kb.toFixed(1))} KB`;
+  }
+  const mb = n / (1024 * 1024);
+  return `${mb >= 10 ? Math.round(mb) : Number(mb.toFixed(1))} MB`;
 }
 
 export function formatDate(iso: string): string {
@@ -102,4 +106,18 @@ export function formatDate(iso: string): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+export function formatRelativeDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return "Now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  return formatDate(iso);
 }

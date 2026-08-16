@@ -34,6 +34,13 @@ of the result you used, same as web search. Prefer the knowledge base over web \
 search when the answer is likely in the attached documents.
 """
 
+QUERY_TABLE_GUIDANCE = """\
+For tabular files, first use `kb_search` to inspect the table schema and exact \
+column names. Then use `query_table` with read-only SQL over the table named \
+`data` for filtering, counting, sorting, and aggregation. Cite rows you rely on \
+with `[cite:<cite_id>]` using only cite IDs returned by `query_table`.
+"""
+
 
 def build_system_prompt(agent: Agent) -> str:
     """Framework wrapper plus the agent's own stored instructions."""

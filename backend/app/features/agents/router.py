@@ -24,7 +24,7 @@ def get_service(
     return AgentService(session)
 
 
-@router.post("/v2/agents", response_model=AgentResponse)
+@router.post("/v1/agents", response_model=AgentResponse)
 async def create_agent(
     body: AgentCreateRequest,
     owner_id: Annotated[str, Depends(get_current_user)],
@@ -33,7 +33,7 @@ async def create_agent(
     return await service.create(owner_id, body)
 
 
-@router.get("/v2/agents", response_model=list[AgentResponse])
+@router.get("/v1/agents", response_model=list[AgentResponse])
 async def list_agents(
     owner_id: Annotated[str, Depends(get_current_user)],
     service: Annotated[AgentService, Depends(get_service)],
@@ -41,7 +41,7 @@ async def list_agents(
     return await service.list_for_owner(owner_id)
 
 
-@router.get("/v2/agents/{agent_id}", response_model=AgentResponse)
+@router.get("/v1/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: str,
     owner_id: Annotated[str, Depends(get_current_user)],
@@ -51,7 +51,7 @@ async def get_agent(
 
 
 @router.get(
-    "/v2/agents/{agent_id}/instructions",
+    "/v1/agents/{agent_id}/instructions",
     response_model=AgentInstructionsResponse,
 )
 async def get_agent_instructions(
@@ -62,7 +62,7 @@ async def get_agent_instructions(
     return await service.get_instructions(owner_id, agent_id)
 
 
-@router.patch("/v2/agents/{agent_id}", response_model=AgentResponse)
+@router.patch("/v1/agents/{agent_id}", response_model=AgentResponse)
 async def update_agent(
     agent_id: str,
     body: AgentUpdateRequest,
@@ -72,7 +72,7 @@ async def update_agent(
     return await service.update(owner_id, agent_id, body)
 
 
-@router.delete("/v2/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/v1/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: str,
     owner_id: Annotated[str, Depends(get_current_user)],
@@ -83,7 +83,7 @@ async def delete_agent(
 
 
 @router.get(
-    "/v2/agents/{agent_id}/collections",
+    "/v1/agents/{agent_id}/collections",
     response_model=list[CollectionResponse],
 )
 async def list_agent_collections(
@@ -95,7 +95,7 @@ async def list_agent_collections(
 
 
 @router.put(
-    "/v2/agents/{agent_id}/collections",
+    "/v1/agents/{agent_id}/collections",
     response_model=list[CollectionResponse],
 )
 async def set_agent_collections(

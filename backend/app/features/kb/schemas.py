@@ -42,3 +42,12 @@ class KbFileSummary(BaseModel):
 class KbFileResponse(KbFileSummary):
     content_md: str | None = Field(default=None, serialization_alias="contentMd")
     index_md: str | None = Field(default=None, serialization_alias="indexMd")
+
+
+class KbFileViewResponse(BaseModel):
+    filename: str
+    mime_type: str = Field(serialization_alias="mimeType")
+    content: str
+    page_count: int | None = Field(default=None, serialization_alias="pageCount")
+
+    model_config = ConfigDict(populate_by_name=True)

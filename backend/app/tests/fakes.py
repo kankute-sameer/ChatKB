@@ -84,11 +84,16 @@ class FakeEmbedder:
 class FakeStorage:
     def __init__(self) -> None:
         self.puts: list[tuple[str, bytes, str]] = []
+        self.objects: dict[str, bytes] = {}
         self.deletes: list[str] = []
         self.presigned: list[tuple[str, int]] = []
 
     async def put(self, key: str, data: bytes, content_type: str) -> None:
         self.puts.append((key, data, content_type))
+        self.objects[key] = data
+
+    async def get(self, key: str) -> bytes:
+        return self.objects[key]
 
     async def presigned_get_url(self, key: str, expires_in: int = 300) -> str:
         self.presigned.append((key, expires_in))
@@ -96,3 +101,4 @@ class FakeStorage:
 
     async def delete(self, key: str) -> None:
         self.deletes.append(key)
+        self.objects.pop(key, None)

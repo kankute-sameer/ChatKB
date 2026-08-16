@@ -126,10 +126,15 @@ class KbChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     section_header: Mapped[str | None] = mapped_column(Text, nullable=True)
-    page: Mapped[int] = mapped_column(Integer, nullable=False)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     anchor: Mapped[str] = mapped_column(String, nullable=False)
-    bbox: Mapped[list[float]] = mapped_column(JsonType, nullable=False)
+    bbox: Mapped[list[float] | None] = mapped_column(JsonType, nullable=True)
     block_type: Mapped[str] = mapped_column(String, nullable=False)
+    chunk_metadata: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JsonType,
+        nullable=True,
+    )
     embedding: Mapped[list[float]] = mapped_column(
         EmbeddingVector(EMBEDDING_DIMENSIONS), nullable=False
     )

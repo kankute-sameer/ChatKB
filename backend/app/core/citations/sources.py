@@ -51,14 +51,16 @@ class KbSource:
         *,
         file_id: str,
         filename: str,
-        page: int,
+        media_type: str,
+        page: int | None,
         anchor: str,
-        bbox: list[float],
+        bbox: list[float] | None,
         collection_id: str,
         snippet: str,
     ) -> None:
         self.file_id = file_id
         self.filename = filename
+        self.media_type = media_type
         self.page = page
         self.anchor = anchor
         self.bbox = bbox
@@ -72,7 +74,7 @@ class KbSource:
         return {
             "type": "source-document",
             "sourceId": cite_id,
-            "mediaType": "application/pdf",
+            "mediaType": self.media_type,
             "title": self.filename,
             "fileId": self.file_id,
             "filename": self.filename,
@@ -96,7 +98,9 @@ class KbSource:
     def to_tool_result(self, cite_id: str) -> dict[str, object]:
         return {
             "cite_id": cite_id,
+            "file_id": self.file_id,
             "filename": self.filename,
+            "media_type": self.media_type,
             "page": self.page,
             "snippet": self.snippet,
         }

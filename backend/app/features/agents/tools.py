@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.citations import Citations
 from app.core.tools.protocol import ToolResult
-from app.features.agents.repository import AgentRepository
+from app.features.agents.db import AgentRepository
 
 
 @dataclass

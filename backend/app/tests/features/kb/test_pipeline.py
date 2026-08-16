@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from app.core.ids import new_id
-from app.features.kb.ingestion.extract import Block
+from app.features.kb.ingestion.extract import Block, ProseExtraction
 from app.features.kb.ingestion.pipeline import run_ingestion
 from app.features.kb.models import Collection, KbChunk, KbFile
 from app.tests.fakes import FakeEmbedder, FakeLLM, FakeStorage
@@ -70,15 +70,15 @@ async def test_pipeline_extract_failure_marks_file_failed(
     pdf_path = tmp_path / "spec.pdf"
     pdf_path.write_bytes(b"%PDF-1.4")
 
-    def boom(_path: Path) -> tuple[list[Block], int]:
+    def boom(_path: Path, _mime_type: str) -> ProseExtraction:
         raise RuntimeError("docling exploded")
 
-    monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract_pdf", boom)
+    monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract", boom)
     storage = FakeStorage()
 
     await run_ingestion(
         file_id=file_id,
-        pdf_path=pdf_path,
+        file_path=pdf_path,
         session_factory=app.state.session_factory,
         llm=app.state.llm,
         embedder=FakeEmbedder(),
@@ -107,8 +107,9 @@ async def test_pipeline_persists_chunks_and_marks_ready(
     embedder = FakeEmbedder()
     storage = FakeStorage()
 
-    def fake_extract(_path: Path) -> tuple[list[Block], int]:
-        return (
+    def fake_extract(_path: Path, _mime_type: str) -> ProseExtraction:
+        return ProseExtraction(
+            "prose",
             [
                 _block("Intro", block_type="section_header", is_heading=True),
                 _block("Hello world.", anchor="p1-2"),
@@ -116,11 +117,11 @@ async def test_pipeline_persists_chunks_and_marks_ready(
             1,
         )
 
-    monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract_pdf", fake_extract)
+    monkeypatch.setattr("app.features.kb.ingestion.pipeline.extract", fake_extract)
 
     await run_ingestion(
         file_id=file_id,
-        pdf_path=pdf_path,
+        file_path=pdf_path,
         session_factory=app.state.session_factory,
         llm=fake_llm,
         embedder=embedder,

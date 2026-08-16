@@ -7,6 +7,7 @@ const twMerge = extendTailwindMerge({
     classGroups: {
       "font-size": [{ text: Object.keys(tokens.fontSize) }],
       "font-weight": [{ font: Object.keys(tokens.fontWeight) }],
+      "max-w": [{ "max-w": Object.keys(tokens.maxWidth) }],
     },
   },
 });

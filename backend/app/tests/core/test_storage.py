@@ -10,11 +10,16 @@ from app.core.storage import S3Storage
 class _Client:
     def __init__(self) -> None:
         self.put_calls: list[dict[str, object]] = []
+        self.get_calls: list[dict[str, object]] = []
         self.delete_calls: list[dict[str, object]] = []
         self.presign_calls: list[tuple[str, dict[str, object]]] = []
 
     async def put_object(self, **kwargs: object) -> None:
         self.put_calls.append(kwargs)
+
+    async def get_object(self, **kwargs: object) -> dict[str, object]:
+        self.get_calls.append(kwargs)
+        return {"Body": _Body(b"stored table")}
 
     async def delete_object(self, **kwargs: object) -> None:
         self.delete_calls.append(kwargs)
@@ -26,6 +31,18 @@ class _Client:
     ) -> str:
         self.presign_calls.append((operation, kwargs))
         return "https://s3.example/presigned"
+
+
+class _Body:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.closed = False
+
+    async def read(self) -> bytes:
+        return self.data
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _ClientContext:
@@ -51,7 +68,7 @@ class _Session:
 
 
 @pytest.mark.asyncio
-async def test_s3_storage_put_delete_and_presign() -> None:
+async def test_s3_storage_put_get_delete_and_presign() -> None:
     client = _Client()
     context = _ClientContext(client)
     session = _Session(context)
@@ -63,6 +80,7 @@ async def test_s3_storage_put_delete_and_presign() -> None:
     await storage.start()
 
     await storage.put("alice/file_1.pdf", b"%PDF", "application/pdf")
+    content = await storage.get("alice/file_1.pdf")
     url = await storage.presigned_get_url("alice/file_1.pdf", expires_in=123)
     await storage.delete("alice/file_1.pdf")
     await storage.aclose()
@@ -84,6 +102,10 @@ async def test_s3_storage_put_delete_and_presign() -> None:
             "ContentType": "application/pdf",
         }
     ]
+    assert client.get_calls == [
+        {"Bucket": "documents", "Key": "alice/file_1.pdf"}
+    ]
+    assert content == b"stored table"
     assert client.presign_calls == [
         (
             "get_object",

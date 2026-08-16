@@ -20,6 +20,7 @@ def _hit(chunk_id: str, collection_id: str = "col_one") -> ChunkHit:
         anchor=f"anchor-{chunk_id}",
         bbox=[0.1, 0.2, 0.3, 0.4],
         filename="document.pdf",
+        mime_type="application/pdf",
         score=0,
     )
 
@@ -65,6 +66,7 @@ class _Db:
                     "anchor": chunk_id,
                     "bbox": [0, 0, 1, 1],
                     "filename": "resume.pdf",
+                    "mime_type": "application/pdf",
                 }
             ]
         )

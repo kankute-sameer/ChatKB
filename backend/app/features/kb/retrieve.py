@@ -21,10 +21,11 @@ class ChunkHit:
     collection_id: str
     text: str
     section_header: str | None
-    page: int
+    page: int | None
     anchor: str
-    bbox: list[float]
+    bbox: list[float] | None
     filename: str
+    mime_type: str
     score: float
 
 
@@ -98,7 +99,8 @@ async def _vector_search(
     statement = text(
         """
         SELECT c.id AS chunk_id, c.file_id, c.collection_id, c.text,
-               c.section_header, c.page, c.anchor, c.bbox, f.filename
+               c.section_header, c.page, c.anchor, c.bbox, f.filename,
+               f.mime_type
         FROM kb_chunks AS c
         JOIN kb_files AS f ON f.id = c.file_id
         WHERE c.collection_id IN :collection_ids
@@ -125,7 +127,8 @@ async def _lexical_search(
     statement = text(
         """
         SELECT c.id AS chunk_id, c.file_id, c.collection_id, c.text,
-               c.section_header, c.page, c.anchor, c.bbox, f.filename
+               c.section_header, c.page, c.anchor, c.bbox, f.filename,
+               f.mime_type
         FROM kb_chunks AS c
         JOIN kb_files AS f ON f.id = c.file_id
         WHERE c.collection_id IN :collection_ids
@@ -158,9 +161,10 @@ def _row_to_hit(row: Any) -> ChunkHit:
         section_header=(
             str(row["section_header"]) if row["section_header"] is not None else None
         ),
-        page=int(row["page"]),
+        page=int(row["page"]) if row["page"] is not None else None,
         anchor=str(row["anchor"]),
-        bbox=[float(value) for value in bbox],
+        bbox=[float(value) for value in bbox] if bbox is not None else None,
         filename=str(row["filename"]),
+        mime_type=str(row["mime_type"]),
         score=0.0,
     )

@@ -4,7 +4,8 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { FileText } from "lucide-react";
+import { canOpenDocument } from "@/components/ai-elements/citation-utils";
+import { FileTypeIcon } from "@/components/FileTypeIcon";
 import { cn } from "@/lib/utils";
 
 export interface WebCitationSource {
@@ -21,9 +22,10 @@ export interface DocumentCitationSource {
   sourceId: string;
   fileId: string;
   filename: string;
-  page: number;
+  mediaType?: string;
+  page: number | null;
   anchor: string;
-  bbox: number[];
+  bbox: number[] | null;
   regions?: number[][];
   collectionId: string;
   snippet?: string;
@@ -57,6 +59,7 @@ export function InlineCitationCardTrigger({
   const first = activeSource ?? sources[0];
   if (!first) return null;
   const document = isDocumentSource(first);
+  const opensViewer = document && canOpenDocument(first);
   const label = document ? first.filename : hostname(first.url);
   const extra = sources.length > 1 ? ` +${sources.length - 1}` : "";
 
@@ -70,16 +73,16 @@ export function InlineCitationCardTrigger({
         )}
         onClick={(event) => {
           event.preventDefault();
-          if (document) {
+          if (opensViewer) {
             onOpenDocument?.(first);
-          } else {
+          } else if (!document) {
             window.open(first.url, "_blank", "noopener,noreferrer");
           }
         }}
         {...props}
       >
         {document ? (
-          <FileText className="size-3 shrink-0" />
+          <FileTypeIcon filename={first.filename} className="size-4" />
         ) : (
           <img
             src={faviconUrl(first.url)}
@@ -189,14 +192,19 @@ export function CitationChip({
             ) : null}
             {isDocumentSource(current) ? (
               <div className="flex min-w-0 gap-2">
-                <FileText className="mt-0.5 size-4 shrink-0 text-ink-muted" />
+                <FileTypeIcon
+                  filename={current.filename}
+                  className="mt-0.5 size-6"
+                />
                 <div className="min-w-0">
                   <p className="truncate font-medium text-ink">
                     {current.filename}
                   </p>
-                  <p className="text-xs text-ink-placeholder">
-                    page {current.page}
-                  </p>
+                  {current.page != null ? (
+                    <p className="text-xs text-ink-placeholder">
+                      page {current.page}
+                    </p>
+                  ) : null}
                   {current.snippet ? (
                     <p className="mt-1 line-clamp-3 text-xs text-ink-muted">
                       {current.snippet}

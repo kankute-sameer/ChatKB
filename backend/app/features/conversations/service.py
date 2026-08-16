@@ -14,21 +14,22 @@ from app.core.log import AppLogger, get_logger
 from app.core.tools import Tool, ToolRegistry
 from app.core.tools.protocol import ToolResult
 from app.features.agents.builder import ensure_builder_agent
+from app.features.agents.db import AgentRepository
 from app.features.agents.models import Agent
-from app.features.agents.repository import AgentRepository
 from app.features.agents.schemas import AgentResponse
 from app.features.agents.tools import AgentEditorContext, agent_editor_tools
 from app.features.agents.wrapper import (
     BASE_INSTRUCTIONS,
     KB_SEARCH_GUIDANCE,
+    QUERY_TABLE_GUIDANCE,
     WEB_SEARCH_GUIDANCE,
     build_system_prompt,
 )
 from app.features.conversations.buffer import EventLog, StreamStore
+from app.features.conversations.db import ConversationRepository
 from app.features.conversations.models import Conversation, Message
 from app.features.conversations.openai import messages_to_responses_input
 from app.features.conversations.prompts import TITLE_PROMPT
-from app.features.conversations.repository import ConversationRepository
 from app.features.conversations.schemas import (
     BuildSessionResponse,
     ConversationCreateResponse,
@@ -39,8 +40,8 @@ from app.features.conversations.schemas import (
     StopResponse,
     UIMessage,
 )
-from app.features.kb.repository import KbRepository
-from app.features.kb.tools import KbSearchTool
+from app.features.kb.db import KbRepository
+from app.features.kb.tools import KbSearchTool, QueryTableTool
 from fastapi import HTTPException, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -723,6 +724,11 @@ async def tools_for_conversation(
 
     agent = await running_agent(session, conversation)
     scoped: list[Tool] = []
+    collection_ids = (
+        await KbRepository(session).get_agent_collection_ids(agent.id)
+        if agent is not None
+        else []
+    )
 
     web = global_tools.get("web_search")
     if web is not None and (
@@ -732,12 +738,11 @@ async def tools_for_conversation(
 
     kb = global_tools.get("kb_search")
     if isinstance(kb, KbSearchTool):
-        collection_ids = (
-            await KbRepository(session).get_agent_collection_ids(agent.id)
-            if agent is not None
-            else []
-        )
         scoped.append(kb.scoped(collection_ids))
+
+    query_table = global_tools.get("query_table")
+    if isinstance(query_table, QueryTableTool):
+        scoped.append(query_table.scoped(collection_ids))
 
     return ToolRegistry(scoped)
 
@@ -753,6 +758,8 @@ async def system_prompt_for(
         system = f"{system}\n\n{WEB_SEARCH_GUIDANCE}"
     if tools.get("kb_search") is not None:
         system = f"{system}\n\n{KB_SEARCH_GUIDANCE}"
+    if tools.get("query_table") is not None:
+        system = f"{system}\n\n{QUERY_TABLE_GUIDANCE}"
     return system
 
 

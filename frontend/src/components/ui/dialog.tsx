@@ -19,7 +19,7 @@ const DialogOverlay = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-gray-900/40", className)}
+    className={cn("fixed inset-0 z-50 bg-gray-900/40 backdrop-blur-sm", className)}
     {...props}
   />
 ));
@@ -64,7 +64,7 @@ function DialogTitle({
 }: ComponentPropsWithoutRef<typeof DialogPrimitive.Title>) {
   return (
     <DialogPrimitive.Title
-      className={cn("text-base font-medium", className)}
+      className={cn("font-sans text-nav font-ui font-medium", className)}
       {...props}
     />
   );

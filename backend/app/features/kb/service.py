@@ -15,21 +15,47 @@ from app.core.ids import new_id
 from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage
+from app.features.kb.db import KbRepository
 from app.features.kb.ingestion.embed import Embedder
 from app.features.kb.ingestion.pipeline import run_ingestion
 from app.features.kb.models import Collection, KbFile
-from app.features.kb.repository import KbRepository
 from app.features.kb.schemas import (
     CollectionCreateRequest,
     CollectionResponse,
     KbFileResponse,
     KbFileSummary,
+    KbFileViewResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 PDF_MAGIC = b"%PDF"
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+SUPPORTED_MIME_TYPES: dict[str, frozenset[str]] = {
+    ".pdf": frozenset({"application/pdf"}),
+    ".docx": frozenset(
+        {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/zip",
+        }
+    ),
+    ".md": frozenset({"text/markdown", "text/plain"}),
+    ".txt": frozenset({"text/plain"}),
+    ".csv": frozenset({"text/csv", "application/csv", "text/plain"}),
+    ".tsv": frozenset({"text/tab-separated-values", "text/plain"}),
+    ".json": frozenset({"application/json", "text/json", "text/plain"}),
+}
+CANONICAL_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ),
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".tsv": "text/tab-separated-values",
+    ".json": "application/json",
+}
 
 
 class KbService:
@@ -93,11 +119,15 @@ class KbService:
     ) -> KbFileResponse:
         await self._owned_collection(collection_id, owner_id)
         data = await upload.read()
-        filename = upload.filename or "upload.pdf"
-        mime_type = upload.content_type or "application/pdf"
-        _validate_pdf(filename, mime_type, data)
+        filename = upload.filename or "upload"
+        extension = Path(filename).suffix.lower()
+        mime_type = _validate_upload(
+            filename,
+            upload.content_type or "application/octet-stream",
+            data,
+        )
 
-        fd, tmp_name = tempfile.mkstemp(suffix=".pdf")
+        fd, tmp_name = tempfile.mkstemp(suffix=extension)
         os.close(fd)
         tmp_path = Path(tmp_name)
         tmp_path.write_bytes(data)
@@ -121,7 +151,7 @@ class KbService:
         task = asyncio.create_task(
             run_ingestion(
                 file_id=kb_file.id,
-                pdf_path=tmp_path,
+                file_path=tmp_path,
                 session_factory=self.session_factory,
                 llm=self.llm,
                 embedder=self.embedder,
@@ -169,6 +199,47 @@ class KbService:
         await self.session.commit()
 
     async def content_url(self, owner_id: str, file_id: str) -> str:
+        kb_file = await self._owned_file(owner_id, file_id)
+        if not kb_file.s3_key:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File content is not available",
+            )
+        return await self.storage.presigned_get_url(kb_file.s3_key, expires_in=300)
+
+    async def view_file(
+        self,
+        owner_id: str,
+        file_id: str,
+    ) -> KbFileViewResponse:
+        kb_file = await self._owned_file(owner_id, file_id)
+        if kb_file.mime_type == "application/pdf":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="PDF files use the document viewer",
+            )
+        suffix = Path(kb_file.filename).suffix.lower()
+        if suffix == ".docx":
+            content = kb_file.content_md or ""
+        else:
+            if not kb_file.s3_key:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="File content is not available",
+                )
+            data = await self.storage.get(kb_file.s3_key)
+            try:
+                content = data.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                content = kb_file.content_md or ""
+        return KbFileViewResponse(
+            filename=kb_file.filename,
+            mime_type=kb_file.mime_type,
+            content=content,
+            page_count=kb_file.page_count,
+        )
+
+    async def _owned_file(self, owner_id: str, file_id: str) -> KbFile:
         kb_file = await self.repo.get_file(file_id)
         if kb_file is None:
             raise HTTPException(
@@ -181,12 +252,7 @@ class KbService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have access to this file",
             )
-        if not kb_file.s3_key:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File content is not available",
-            )
-        return await self.storage.presigned_get_url(kb_file.s3_key, expires_in=300)
+        return kb_file
 
     async def _owned_collection(self, collection_id: str, owner_id: str) -> Collection:
         collection = await self.repo.get_owned_collection(collection_id, owner_id)
@@ -198,7 +264,7 @@ class KbService:
         return collection
 
 
-def _validate_pdf(filename: str, mime_type: str, data: bytes) -> None:
+def _validate_upload(filename: str, mime_type: str, data: bytes) -> str:
     if not data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file"
@@ -208,12 +274,43 @@ def _validate_pdf(filename: str, mime_type: str, data: bytes) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File exceeds 50 MB limit",
         )
-    looks_pdf = filename.lower().endswith(".pdf") or mime_type == "application/pdf"
-    if not looks_pdf or not data.startswith(PDF_MAGIC):
+    extension = Path(filename).suffix.lower()
+    allowed = SUPPORTED_MIME_TYPES.get(extension)
+    if allowed is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are supported",
+            detail=(
+                "Supported file types: PDF, DOCX, TXT, MD, CSV, TSV, and JSON"
+            ),
         )
+    if mime_type not in allowed and mime_type != "application/octet-stream":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File content type does not match {extension}",
+        )
+    if extension == ".pdf" and not data.startswith(PDF_MAGIC):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid PDF file",
+        )
+    if extension == ".docx" and not data.startswith(b"PK"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid DOCX file",
+        )
+    if extension in {".md", ".txt", ".csv", ".tsv", ".json"}:
+        try:
+            data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Text files must be UTF-8 encoded",
+            ) from exc
+    return (
+        CANONICAL_MIME_TYPES[extension]
+        if mime_type == "application/octet-stream"
+        else mime_type
+    )
 
 
 def _log_ingest_task(task: asyncio.Task[None]) -> None:

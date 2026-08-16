@@ -1,24 +1,55 @@
 from __future__ import annotations
 
+import csv
+import json
+import re
 import threading
+from dataclasses import dataclass
+from datetime import date, datetime
+from io import StringIO
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
+
+from markdown_it import MarkdownIt
 
 
 class Block(TypedDict):
     text: str
     block_type: str
-    page: int
+    page: int | None
     anchor: str
-    bbox: list[float]
+    bbox: list[float] | None
     is_heading: bool
 
+
+@dataclass(frozen=True)
+class ProseExtraction:
+    kind: Literal["prose"]
+    blocks: list[Block]
+    page_count: int | None
+
+
+@dataclass(frozen=True)
+class TableExtraction:
+    kind: Literal["table"]
+    columns: list[str]
+    rows: list[dict[str, str]]
+    column_types: dict[str, str]
+
+
+ExtractionResult = ProseExtraction | TableExtraction
 
 _converter: Any | None = None
 _converter_lock = threading.Lock()
 
 HEADING_LABELS = frozenset({"section_header"})
 TABLE_LABELS = frozenset({"table"})
+SUPPORTED_EXTENSIONS = frozenset(
+    {".pdf", ".docx", ".md", ".txt", ".csv", ".tsv", ".json"}
+)
+TABLE_SAMPLE_ROWS = 100
+JSON_BLOCK_CHARS = 8_000
+_BLANK_LINES_RE = re.compile(r"\n\s*\n+")
 
 
 def get_converter() -> Any:
@@ -47,10 +78,32 @@ def _build_converter() -> Any:
     options.do_ocr = False
     options.do_table_structure = True
     return DocumentConverter(
+        allowed_formats=[InputFormat.PDF, InputFormat.DOCX],
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=options),
         }
     )
+
+
+def extract(path: str | Path, mime_type: str) -> ExtractionResult:
+    """Route a supported resource to its normalized prose or table extractor."""
+    file_path = Path(path)
+    extension = file_path.suffix.lower()
+    if extension not in SUPPORTED_EXTENSIONS:
+        raise ValueError(f"Unsupported file type: {extension or mime_type}")
+    if extension == ".pdf":
+        blocks, page_count = extract_pdf(file_path)
+        return ProseExtraction("prose", blocks, page_count)
+    if extension == ".docx":
+        return ProseExtraction("prose", extract_docx(file_path), None)
+    if extension == ".md":
+        return ProseExtraction("prose", extract_markdown(file_path), None)
+    if extension == ".txt":
+        return ProseExtraction("prose", extract_text(file_path), None)
+    if extension in {".csv", ".tsv"}:
+        delimiter = "\t" if extension == ".tsv" else ","
+        return extract_delimited(file_path, delimiter=delimiter)
+    return extract_json(file_path)
 
 
 def normalize_bbox(
@@ -82,16 +135,220 @@ def extract_pdf(path: str | Path) -> tuple[list[Block], int]:
     converter = get_converter()
     result = converter.convert(str(path))
     document = result.document
-    blocks = blocks_from_document(document)
+    blocks = blocks_from_document(document, include_locations=True)
     pages = getattr(document, "pages", None) or {}
     if pages:
         page_count = len(pages)
     else:
-        page_count = max((block["page"] for block in blocks), default=0)
+        page_count = max(
+            (block["page"] or 0 for block in blocks),
+            default=0,
+        )
     return blocks, page_count
 
 
-def blocks_from_document(document: Any) -> list[Block]:
+def extract_docx(path: str | Path) -> list[Block]:
+    converter = get_converter()
+    result = converter.convert(str(path))
+    return blocks_from_document(result.document, include_locations=False)
+
+
+def extract_markdown(path: str | Path) -> list[Block]:
+    text = Path(path).read_text(encoding="utf-8-sig")
+    tokens = MarkdownIt("commonmark").parse(text)
+    blocks: list[Block] = []
+    counters: dict[str, int] = {}
+    previous_type = ""
+    for token in tokens:
+        if token.type == "inline":
+            content = token.content.strip()
+            if content:
+                is_heading = previous_type == "heading_open"
+                block_type = "section_header" if is_heading else "paragraph"
+                counters[block_type] = counters.get(block_type, 0) + 1
+                blocks.append(
+                    _text_block(
+                        content,
+                        block_type,
+                        f"{block_type}-{counters[block_type]}",
+                        is_heading=is_heading,
+                    )
+                )
+        previous_type = token.type
+    return blocks
+
+
+def extract_text(path: str | Path) -> list[Block]:
+    text = Path(path).read_text(encoding="utf-8-sig")
+    paragraphs = [
+        paragraph.strip()
+        for paragraph in _BLANK_LINES_RE.split(text)
+        if paragraph.strip()
+    ]
+    return [
+        _text_block(paragraph, "paragraph", f"paragraph-{index}")
+        for index, paragraph in enumerate(paragraphs, start=1)
+    ]
+
+
+def extract_delimited(path: str | Path, *, delimiter: str) -> TableExtraction:
+    text = Path(path).read_text(encoding="utf-8-sig")
+    reader = csv.DictReader(StringIO(text), delimiter=delimiter)
+    columns = [str(name).strip() for name in (reader.fieldnames or []) if name]
+    if not columns:
+        raise ValueError("Tabular file has no header")
+    rows: list[dict[str, str]] = []
+    for raw_row in reader:
+        rows.append(
+            {
+                column: str(raw_row.get(column) or "").strip()
+                for column in columns
+            }
+        )
+        if len(rows) >= TABLE_SAMPLE_ROWS:
+            break
+    return TableExtraction("table", columns, rows, infer_column_types(columns, rows))
+
+
+def extract_json(path: str | Path) -> ExtractionResult:
+    value = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    table = _json_table(value)
+    if table is not None:
+        return table
+    pretty = json.dumps(value, ensure_ascii=False, indent=2)
+    blocks = [
+        _text_block(
+            pretty[start : start + JSON_BLOCK_CHARS],
+            "paragraph",
+            f"json-{index}",
+        )
+        for index, start in enumerate(
+            range(0, len(pretty), JSON_BLOCK_CHARS),
+            start=1,
+        )
+    ]
+    return ProseExtraction("prose", blocks, None)
+
+
+def infer_column_types(
+    columns: list[str],
+    rows: list[dict[str, str]],
+) -> dict[str, str]:
+    return {
+        column: _infer_values([row.get(column, "") for row in rows])
+        for column in columns
+    }
+
+
+def _json_table(value: object) -> TableExtraction | None:
+    if not isinstance(value, list) or not value:
+        return None
+    if not all(isinstance(row, dict) for row in value):
+        return None
+    object_rows = [row for row in value if isinstance(row, dict)]
+    if not all(
+        all(_is_scalar(cell) for cell in row.values())
+        for row in object_rows
+    ):
+        return None
+    columns = list(
+        dict.fromkeys(str(key) for row in object_rows for key in row)
+    )
+    if not columns:
+        return None
+    shared = set(object_rows[0])
+    union = set(object_rows[0])
+    for row in object_rows[1:]:
+        shared &= set(row)
+        union |= set(row)
+    if union and len(shared) / len(union) < 0.6:
+        return None
+    rows = [
+        {
+            column: _scalar_text(row.get(column))
+            for column in columns
+        }
+        for row in object_rows[:TABLE_SAMPLE_ROWS]
+    ]
+    return TableExtraction("table", columns, rows, infer_column_types(columns, rows))
+
+
+def _is_scalar(value: object) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def _scalar_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _infer_values(values: list[str]) -> str:
+    present = [value.strip() for value in values if value.strip()]
+    if not present:
+        return "string"
+    if all(_is_integer(value) for value in present):
+        return "integer"
+    if all(_is_number(value) for value in present):
+        return "number"
+    if all(_is_date(value) for value in present):
+        return "date"
+    return "string"
+
+
+def _is_integer(value: str) -> bool:
+    try:
+        int(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_number(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_date(value: str) -> bool:
+    normalized = value.replace("Z", "+00:00")
+    try:
+        datetime.fromisoformat(normalized)
+        return True
+    except ValueError:
+        try:
+            date.fromisoformat(value)
+            return True
+        except ValueError:
+            return False
+
+
+def _text_block(
+    text: str,
+    block_type: str,
+    anchor: str,
+    *,
+    is_heading: bool = False,
+) -> Block:
+    return {
+        "text": text,
+        "block_type": block_type,
+        "page": None,
+        "anchor": anchor,
+        "bbox": None,
+        "is_heading": is_heading,
+    }
+
+
+def blocks_from_document(
+    document: Any,
+    *,
+    include_locations: bool = True,
+) -> list[Block]:
     blocks: list[Block] = []
     page_indexes: dict[int, int] = {}
     for item, _level in document.iterate_items():
@@ -99,14 +356,20 @@ def blocks_from_document(document: Any) -> list[Block]:
         text = _item_text(item, document)
         if not text:
             continue
-        page, bbox = _item_location(item, document)
-        page_indexes[page] = page_indexes.get(page, 0) + 1
+        if include_locations:
+            page, bbox = _item_location(item, document)
+            page_key = page or 0
+        else:
+            page, bbox = None, None
+            page_key = 0
+        page_indexes[page_key] = page_indexes.get(page_key, 0) + 1
+        prefix = f"p{page}" if page is not None else "block"
         blocks.append(
             {
                 "text": text,
                 "block_type": label,
                 "page": page,
-                "anchor": f"p{page}-{page_indexes[page]}",
+                "anchor": f"{prefix}-{page_indexes[page_key]}",
                 "bbox": bbox,
                 "is_heading": label in HEADING_LABELS,
             }

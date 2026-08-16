@@ -16,6 +16,7 @@ from app.features.kb.schemas import (
     CollectionResponse,
     KbFileResponse,
     KbFileSummary,
+    KbFileViewResponse,
 )
 from app.features.kb.service import KbService
 
@@ -165,3 +166,12 @@ async def get_file_content(
     # Redirecting is deliberate: S3 honors range requests, so pdf.js can lazily
     # fetch the cited page instead of downloading the PDF through this API.
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/v1/files/{file_id}/view", response_model=KbFileViewResponse)
+async def view_file(
+    file_id: str,
+    owner_id: Annotated[str, Depends(get_current_user)],
+    service: Annotated[KbService, Depends(get_service)],
+) -> KbFileViewResponse:
+    return await service.view_file(owner_id, file_id)

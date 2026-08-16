@@ -23,7 +23,7 @@ from app.features.conversations.tools import WebSearchTool
 from app.features.kb import models as kb_models  # noqa: F401
 from app.features.kb.ingestion.embed import GeminiEmbedder
 from app.features.kb.router import router as kb_router
-from app.features.kb.tools import KbSearchTool
+from app.features.kb.tools import KbSearchTool, QueryTableTool
 
 
 @asynccontextmanager
@@ -42,6 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         [
             WebSearchTool(exa),
             KbSearchTool(embedder, session_factory),
+            QueryTableTool(session_factory, storage),
         ]
     )
     app.state.engine = engine

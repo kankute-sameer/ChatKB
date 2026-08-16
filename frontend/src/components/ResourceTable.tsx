@@ -21,6 +21,7 @@ interface ResourceTableProps<T> {
   getRowId: (row: T) => string;
   onRowClick?: (row: T) => void;
   emptyMessage?: string;
+  className?: string;
 }
 
 export function ResourceTable<T>({
@@ -29,9 +30,10 @@ export function ResourceTable<T>({
   getRowId,
   onRowClick,
   emptyMessage = "Nothing here yet.",
+  className,
 }: ResourceTableProps<T>) {
   return (
-    <Table>
+    <Table className={className}>
       <TableHeader>
         <TableRow>
           {columns.map((column) => (

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { ChatView, ComposerStartDefault } from "@/components/ChatView";
-import { DocumentViewer } from "@/components/DocumentViewer";
+import { ResourceViewer } from "@/components/ResourceViewer";
 import type { DocumentCitationSource } from "@/components/ai-elements/inline-citation";
 import { getToken } from "@/lib/api";
 import { segmentsFromParts } from "@/lib/activity";
@@ -270,10 +270,11 @@ export function ConversationChat({
         />
       </div>
       {openDocument ? (
-        <DocumentViewer
+        <ResourceViewer
           fileId={openDocument.fileId}
-          page={openDocument.page}
-          bbox={openDocument.bbox}
+          mediaType={openDocument.mediaType}
+          page={openDocument.page ?? undefined}
+          bbox={openDocument.bbox ?? undefined}
           regions={openDocument.regions}
           filename={openDocument.filename}
           onClose={() => setOpenDocument(null)}
@@ -326,9 +327,9 @@ function toUIMessages(messages: ConversationMessage[]): UIMessage[] {
             title: String(part.title ?? part.filename ?? ""),
             fileId: String(part.fileId ?? ""),
             filename: String(part.filename ?? ""),
-            page: Number(part.page ?? 0),
+            page: typeof part.page === "number" ? part.page : null,
             anchor: String(part.anchor ?? ""),
-            bbox: Array.isArray(part.bbox) ? part.bbox : [],
+            bbox: Array.isArray(part.bbox) ? part.bbox : null,
             regions: Array.isArray(part.regions) ? part.regions : undefined,
             collectionId: String(part.collectionId ?? ""),
             snippet: typeof part.snippet === "string" ? part.snippet : undefined,
@@ -405,6 +406,7 @@ function sourcesFromUIMessage(message: UIMessage): ChatMessage["sources"] {
       const extra = part as unknown as {
         sourceId: string;
         title?: string;
+        mediaType?: string;
         fileId?: string;
         filename?: string;
         page?: number;
@@ -425,9 +427,10 @@ function sourcesFromUIMessage(message: UIMessage): ChatMessage["sources"] {
           sourceId: extra.sourceId,
           fileId: String(extra.fileId ?? metadata?.fileId ?? ""),
           filename,
-          page: Number(extra.page ?? metadata?.page ?? 0),
+          mediaType: String(extra.mediaType ?? "application/pdf"),
+          page: optionalNumber(extra.page ?? metadata?.page),
           anchor: String(extra.anchor ?? metadata?.anchor ?? ""),
-          bbox: numericArray(extra.bbox ?? metadata?.bbox),
+          bbox: optionalNumericArray(extra.bbox ?? metadata?.bbox),
           regions: numericRegions(extra.regions ?? metadata?.regions),
           collectionId: String(
             extra.collectionId ?? metadata?.collectionId ?? "",
@@ -447,6 +450,15 @@ function sourcesFromUIMessage(message: UIMessage): ChatMessage["sources"] {
 function numericArray(value: unknown): number[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is number => typeof item === "number");
+}
+
+function optionalNumericArray(value: unknown): number[] | null {
+  const values = numericArray(value);
+  return values.length ? values : null;
+}
+
+function optionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function numericRegions(value: unknown): number[][] | undefined {

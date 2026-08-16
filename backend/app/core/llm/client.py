@@ -185,7 +185,7 @@ def _parse_sse_data(
     if data == "":
         return None
     if log is not None:
-        log.debug("RAW OPENAI CHUNK << %s", data)
+        log.debug("RAW OPENAI CHUNK : %s", data)
     if data == "[DONE]":
         return None
     parsed: object = json.loads(data)

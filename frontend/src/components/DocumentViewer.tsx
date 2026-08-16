@@ -18,8 +18,9 @@ export type NormalizedBbox = [number, number, number, number];
 
 export interface DocumentViewerProps {
   fileId: string;
-  page: number;
-  bbox: number[];
+  /** When set, focuses a single page (citation mode). Omit to browse the whole PDF. */
+  page?: number;
+  bbox?: number[];
   regions?: number[][];
   filename: string;
   onClose: () => void;
@@ -28,7 +29,7 @@ export interface DocumentViewerProps {
 export function DocumentViewer({
   fileId,
   page,
-  bbox,
+  bbox = [],
   regions,
   filename,
   onClose,
@@ -37,7 +38,10 @@ export function DocumentViewer({
   const [containerWidth, setContainerWidth] = useState(800);
   const [zoom, setZoom] = useState(1);
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
+  const [numPages, setNumPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const citeMode = page != null;
 
   useEffect(() => {
     const element = containerRef.current;
@@ -69,23 +73,37 @@ export function DocumentViewer({
 
   const renderWidth = Math.round(containerWidth * zoom);
   const boxes = regions?.length ? regions : [bbox];
-  const overlays = boxes
-    .map((region) =>
-      calculateOverlay(region, pageSize.width, pageSize.height),
-    )
-    .filter((rect): rect is OverlayRect => rect !== null);
+  const overlays = citeMode
+    ? boxes
+        .map((region) =>
+          calculateOverlay(region, pageSize.width, pageSize.height),
+        )
+        .filter((rect): rect is OverlayRect => rect !== null)
+    : [];
+
+  const pageNumbers = citeMode
+    ? [Math.max(1, page)]
+    : Array.from({ length: numPages }, (_, index) => index + 1);
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`${filename}, page ${page}`}
+      aria-label={citeMode ? `${filename}, page ${page}` : filename}
       className="fixed inset-y-0 right-0 z-[70] flex w-full flex-col border-l border-border bg-gray-100 shadow-2xl md:w-[clamp(36rem,60vw,64rem)]"
     >
       <div className="flex items-center gap-3 border-b border-border bg-white px-4 py-3 text-ink">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{filename}</p>
-          <p className="text-xs text-ink-muted">Page {page}</p>
+          <p className="truncate font-sans text-nav font-ui font-medium">
+            {filename}
+          </p>
+          {citeMode ? (
+            <p className="text-xs text-ink-muted">Page {page}</p>
+          ) : numPages > 0 ? (
+            <p className="text-xs text-ink-muted">
+              {numPages} page{numPages === 1 ? "" : "s"}
+            </p>
+          ) : null}
         </div>
         <Button
           type="button"
@@ -120,7 +138,7 @@ export function DocumentViewer({
       </div>
 
       <div ref={containerRef} className="min-h-0 flex-1 overflow-auto p-6">
-        <div className="mx-auto w-fit shadow-2xl">
+        <div className="mx-auto flex w-fit flex-col gap-6">
           <Document
             file={file}
             loading={
@@ -133,48 +151,55 @@ export function DocumentViewer({
                 {error ?? "Could not load this PDF."}
               </div>
             }
+            onLoadSuccess={(doc) => setNumPages(doc.numPages)}
             onLoadError={(loadError) => setError(loadError.message)}
           >
-            <div className="relative bg-white">
-              <Page
-                pageNumber={Math.max(1, page)}
-                width={renderWidth}
-                renderAnnotationLayer={false}
-                renderTextLayer
-                onRenderSuccess={(pdfPage) => {
-                  const viewport = pdfPage.getViewport({ scale: 1 });
-                  const scale = renderWidth / viewport.width;
-                  setPageSize({
-                    width: renderWidth,
-                    height: viewport.height * scale,
-                  });
-                }}
-              />
-              {overlays.map((rect, index) => (
-                <div key={`${rect.left}-${rect.top}-${index}`} aria-hidden>
-                  {/*
-                    Multiply must sit on this element itself. A parent with
-                    z-index creates a stacking context and breaks blending,
-                    which tints the PDF text yellow instead of leaving it black.
-                  */}
-                  <div
-                    className="pointer-events-none absolute"
-                    style={{
-                      ...rect,
-                      backgroundColor: "rgb(252, 232, 172)",
-                      mixBlendMode: "multiply",
-                    }}
-                  />
-                  <div
-                    className="pointer-events-none absolute"
-                    style={{
-                      ...rect,
-                      border: "1.5px solid rgb(252, 232, 172)",
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+            {pageNumbers.map((pageNumber) => (
+              <div
+                key={pageNumber}
+                className="relative bg-white shadow-2xl"
+              >
+                <Page
+                  pageNumber={pageNumber}
+                  width={renderWidth}
+                  renderAnnotationLayer={false}
+                  renderTextLayer
+                  onRenderSuccess={(pdfPage) => {
+                    if (!citeMode || pageNumber !== page) return;
+                    const viewport = pdfPage.getViewport({ scale: 1 });
+                    const scale = renderWidth / viewport.width;
+                    setPageSize({
+                      width: renderWidth,
+                      height: viewport.height * scale,
+                    });
+                  }}
+                />
+                {citeMode && pageNumber === page
+                  ? overlays.map((rect, index) => (
+                      <div
+                        key={`${rect.left}-${rect.top}-${index}`}
+                        aria-hidden
+                      >
+                        <div
+                          className="pointer-events-none absolute"
+                          style={{
+                            ...rect,
+                            backgroundColor: "rgb(252, 232, 172)",
+                            mixBlendMode: "multiply",
+                          }}
+                        />
+                        <div
+                          className="pointer-events-none absolute"
+                          style={{
+                            ...rect,
+                            border: "1.5px solid rgb(252, 232, 172)",
+                          }}
+                        />
+                      </div>
+                    ))
+                  : null}
+              </div>
+            ))}
           </Document>
         </div>
       </div>

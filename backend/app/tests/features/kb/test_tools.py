@@ -17,6 +17,7 @@ def test_kb_source_shapes() -> None:
     source = KbSource(
         file_id="file_1",
         filename="resume.pdf",
+        media_type="application/pdf",
         page=3,
         anchor="page-3-block-2",
         bbox=[0.1, 0.2, 0.8, 0.3],
@@ -29,7 +30,9 @@ def test_kb_source_shapes() -> None:
     assert part["bbox"] == [0.1, 0.2, 0.8, 0.3]
     assert source.to_tool_result("abc12345") == {
         "cite_id": "abc12345",
+        "file_id": "file_1",
         "filename": "resume.pdf",
+        "media_type": "application/pdf",
         "page": 3,
         "snippet": "Relevant experience",
     }
@@ -82,6 +85,7 @@ async def test_kb_search_mints_document_citations(
                 anchor="block-7",
                 bbox=[0.1, 0.2, 0.9, 0.4],
                 filename="resume.pdf",
+                mime_type="application/pdf",
                 score=0.02,
             )
         ]
@@ -98,6 +102,26 @@ async def test_kb_search_mints_document_citations(
 
     assert seen == {"query": "experience", "collection_ids": ["col_1"]}
     assert payload[0]["filename"] == "resume.pdf"
+    assert payload[0]["file_id"] == "file_1"
+    assert payload[0]["media_type"] == "application/pdf"
     assert payload[0]["cite_id"] in citations.known_ids()
     assert result.source_parts[0]["type"] == "source-document"
     assert result.source_parts[0]["collectionId"] == "col_1"
+
+
+def test_page_less_kb_source_is_valid() -> None:
+    source = KbSource(
+        file_id="file_csv",
+        filename="employees.csv",
+        media_type="text/csv",
+        page=None,
+        anchor="table-schema",
+        bbox=None,
+        collection_id="col_1",
+        snippet="Employee table schema",
+    )
+    part = source.to_source_part("csv12345")
+    assert part["type"] == "source-document"
+    assert part["mediaType"] == "text/csv"
+    assert part["page"] is None
+    assert part["bbox"] is None

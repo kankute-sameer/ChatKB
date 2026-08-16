@@ -108,7 +108,7 @@ async def _get_conversation_state(
     app: FastAPI, conversation_id: str
 ) -> dict[str, Any]:
     async with app.state.session_factory() as session:
-        from app.features.conversations.repository import ConversationRepository
+        from app.features.conversations.db import ConversationRepository
 
         repo = ConversationRepository(session)
         conversation = await repo.get(conversation_id)

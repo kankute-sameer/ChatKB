@@ -11,12 +11,13 @@ from app.core.ids import new_id
 from app.core.llm.types import LLM
 from app.core.log import AppLogger, get_logger
 from app.core.storage import Storage
+from app.features.kb.db import KbRepository
 from app.features.kb.ingestion.assemble import assemble_content, generate_index
 from app.features.kb.ingestion.chunk import chunk_blocks
 from app.features.kb.ingestion.embed import Embedder
-from app.features.kb.ingestion.extract import extract_pdf
+from app.features.kb.ingestion.extract import ProseExtraction, extract
+from app.features.kb.ingestion.table import prepare_table
 from app.features.kb.models import KbChunk, KbFile
-from app.features.kb.repository import KbRepository
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 async def run_ingestion(
     *,
     file_id: str,
-    pdf_path: Path,
+    file_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
     llm: LLM,
     embedder: Embedder,
@@ -49,7 +50,7 @@ async def run_ingestion(
                 session,
                 repo,
                 row,
-                pdf_path,
+                file_path,
                 llm,
                 embedder,
                 storage,
@@ -67,14 +68,14 @@ async def run_ingestion(
                 failed.updated_at = datetime.now(UTC)
                 await session.commit()
         finally:
-            pdf_path.unlink(missing_ok=True)
+            file_path.unlink(missing_ok=True)
 
 
 async def _ingest(
     session: AsyncSession,
     repo: KbRepository,
     row: KbFile,
-    pdf_path: Path,
+    file_path: Path,
     llm: LLM,
     embedder: Embedder,
     storage: Storage,
@@ -82,19 +83,30 @@ async def _ingest(
     ingestion_model: str,
     log: AppLogger,
 ) -> None:
-    s3_key = f"{owner_id}/{row.id}.pdf"
+    suffix = Path(row.filename).suffix.lower()
+    s3_key = f"{owner_id}/{row.id}{suffix}"
     log.info("uploading %s to object storage", row.filename)
-    pdf_bytes = await asyncio.to_thread(pdf_path.read_bytes)
-    await storage.put(s3_key, pdf_bytes, "application/pdf")
+    file_bytes = await asyncio.to_thread(file_path.read_bytes)
+    await storage.put(s3_key, file_bytes, row.mime_type)
     row.s3_key = s3_key
     row.updated_at = datetime.now(UTC)
     await session.commit()
 
     log.info("extracting %s", row.filename)
-    blocks, page_count = await asyncio.to_thread(extract_pdf, pdf_path)
-    content_md = assemble_content(blocks)
+    extraction = await asyncio.to_thread(extract, file_path, row.mime_type)
+    if isinstance(extraction, ProseExtraction):
+        content_md = assemble_content(extraction.blocks)
+        chunks = chunk_blocks(extraction.blocks)
+        page_count = extraction.page_count
+    else:
+        content_md, chunks = await prepare_table(
+            extraction,
+            filename=row.filename,
+            llm=llm,
+            model=ingestion_model,
+        )
+        page_count = None
     index_md = await generate_index(content_md, llm, ingestion_model)
-    chunks = chunk_blocks(blocks)
     embeddings = await embedder.embed([chunk.text for chunk in chunks])
     now = datetime.now(UTC)
     rows = [
@@ -109,6 +121,7 @@ async def _ingest(
             anchor=chunk.anchor,
             bbox=chunk.bbox,
             block_type=chunk.block_type,
+            chunk_metadata=chunk.metadata,
             embedding=embedding,
             created_at=now,
         )

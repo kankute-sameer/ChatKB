@@ -16,11 +16,11 @@ const buttonVariants = cva(
         accent: "bg-accent-muted text-accent hover:bg-accent-muted",
       },
       size: {
-        default: "h-8 px-3 text-sm",
-        sm: "h-6 px-2 text-xs",
-        lg: "h-8 px-4 text-sm",
+        default: "h-row px-4 text-nav",
+        sm: "h-8 px-3 text-nav",
+        lg: "h-row px-5 text-nav",
         icon: "size-8",
-        pill: "h-8 px-4 rounded-full text-sm",
+        pill: "h-row px-4 rounded-full text-nav",
       },
     },
     defaultVariants: {
@@ -41,7 +41,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button";
     return (
       <Comp
-        className={cn(buttonVariants({ variant, size, className }), "font-ui")}
+        className={cn(buttonVariants({ variant, size }), "font-ui", className)}
         ref={ref}
         {...props}
       />

@@ -75,7 +75,7 @@ async def _create_agent(
     client: AsyncClient, token: str, name: str = "Researcher"
 ) -> dict[str, object]:
     response = await client.post(
-        "/v2/agents",
+        "/v1/agents",
         headers=_headers(token),
         json={"name": name, "description": "Finds sources"},
     )
@@ -113,7 +113,7 @@ async def test_remove_web_search_connector_drops_tool(
     agent_id = str(created["id"])
 
     patched = await client.patch(
-        f"/v2/agents/{agent_id}",
+        f"/v1/agents/{agent_id}",
         headers=_headers(token),
         json={"connectors": [], "instructions": "No search."},
     )
@@ -160,7 +160,7 @@ async def test_agent_crud_and_instructions_endpoint(client: AsyncClient) -> None
     created = await _create_agent(client, token, name="Ops")
     agent_id = str(created["id"])
 
-    listed = await client.get("/v2/agents", headers=_headers(token))
+    listed = await client.get("/v1/agents", headers=_headers(token))
     assert listed.status_code == 200
     rows = listed.json()
     assert isinstance(rows, list)
@@ -168,7 +168,7 @@ async def test_agent_crud_and_instructions_endpoint(client: AsyncClient) -> None
     assert rows[0]["id"] == agent_id
 
     patched = await client.patch(
-        f"/v2/agents/{agent_id}",
+        f"/v1/agents/{agent_id}",
         headers=_headers(token),
         json={"instructions": "Answer with citations.", "name": "Ops Bot"},
     )
@@ -177,15 +177,15 @@ async def test_agent_crud_and_instructions_endpoint(client: AsyncClient) -> None
     assert patched.json()["instructions"] == "Answer with citations."
 
     instructions = await client.get(
-        f"/v2/agents/{agent_id}/instructions",
+        f"/v1/agents/{agent_id}/instructions",
         headers=_headers(token),
     )
     assert instructions.status_code == 200
     assert instructions.json() == {"instructions": "Answer with citations."}
 
-    deleted = await client.delete(f"/v2/agents/{agent_id}", headers=_headers(token))
+    deleted = await client.delete(f"/v1/agents/{agent_id}", headers=_headers(token))
     assert deleted.status_code == 204
-    missing = await client.get(f"/v2/agents/{agent_id}", headers=_headers(token))
+    missing = await client.get(f"/v1/agents/{agent_id}", headers=_headers(token))
     assert missing.status_code == 404
 
 
@@ -206,7 +206,7 @@ async def test_agent_collections_replace_set_and_validate_ids(
         collection_ids.append(str(created.json()["id"]))
 
     attached = await client.put(
-        f"/v2/agents/{agent['id']}/collections",
+        f"/v1/agents/{agent['id']}/collections",
         headers=_headers(token),
         json={"collectionIds": collection_ids},
     )
@@ -214,7 +214,7 @@ async def test_agent_collections_replace_set_and_validate_ids(
     assert [row["id"] for row in attached.json()] == collection_ids
 
     replaced = await client.put(
-        f"/v2/agents/{agent['id']}/collections",
+        f"/v1/agents/{agent['id']}/collections",
         headers=_headers(token),
         json={"collectionIds": [collection_ids[1]]},
     )
@@ -222,13 +222,13 @@ async def test_agent_collections_replace_set_and_validate_ids(
     assert [row["id"] for row in replaced.json()] == [collection_ids[1]]
 
     invalid = await client.put(
-        f"/v2/agents/{agent['id']}/collections",
+        f"/v1/agents/{agent['id']}/collections",
         headers=_headers(token),
         json={"collectionIds": ["col_not_owned"]},
     )
     assert invalid.status_code == 400
     listed = await client.get(
-        f"/v2/agents/{agent['id']}/collections",
+        f"/v1/agents/{agent['id']}/collections",
         headers=_headers(token),
     )
     assert [row["id"] for row in listed.json()] == [collection_ids[1]]
@@ -245,10 +245,10 @@ async def test_list_excludes_builder_and_builder_is_not_user_owned(
         headers=_headers(token),
         json={"targetAgentId": str(agent["id"])},
     )
-    listed = await client.get("/v2/agents", headers=_headers(token))
+    listed = await client.get("/v1/agents", headers=_headers(token))
     ids = {row["id"] for row in listed.json()}
     assert BUILDER_AGENT_ID not in ids
-    hidden = await client.get(f"/v2/agents/{BUILDER_AGENT_ID}", headers=_headers(token))
+    hidden = await client.get(f"/v1/agents/{BUILDER_AGENT_ID}", headers=_headers(token))
     assert hidden.status_code == 404
 
 
@@ -260,7 +260,7 @@ async def test_conversation_with_agent_uses_wrapped_system_prompt(
     agent = await _create_agent(client, token)
     agent_id = str(agent["id"])
     await client.patch(
-        f"/v2/agents/{agent_id}",
+        f"/v1/agents/{agent_id}",
         headers=_headers(token),
         json={"instructions": "Always greet with ping."},
     )
@@ -295,12 +295,14 @@ async def test_conversation_with_agent_uses_wrapped_system_prompt(
     content = str(system.get("content") or "")
     assert "Always greet with ping." in content
     assert content.startswith(BASE_INSTRUCTIONS[:40])
+    assert "table named `data`" in content
     tool_names = {
         item.get("name")
         for item in (fake_llm.tools_seen[0] or [])
         if isinstance(item, dict)
     }
     assert "web_search" in tool_names
+    assert "query_table" in tool_names
     assert "get_agent_setup" not in tool_names
 
 
@@ -320,7 +322,7 @@ async def test_attached_collections_scope_kb_tool_and_persist_document_source(
     )
     collection_id = str(collection.json()["id"])
     attached = await client.put(
-        f"/v2/agents/{agent['id']}/collections",
+        f"/v1/agents/{agent['id']}/collections",
         headers=_headers(token),
         json={"collectionIds": [collection_id]},
     )
@@ -346,6 +348,7 @@ async def test_attached_collections_scope_kb_tool_and_persist_document_source(
                 anchor="experience-1",
                 bbox=[0.1, 0.2, 0.8, 0.4],
                 filename="resume.pdf",
+                mime_type="application/pdf",
                 score=0.03,
             )
         ]
@@ -515,7 +518,7 @@ async def test_build_session_runs_builder_tools_against_target(
     assert "# Agent Creator" in system
     assert system.startswith(BASE_INSTRUCTIONS[:40])
 
-    loaded = await client.get(f"/v2/agents/{agent_id}", headers=_headers(token))
+    loaded = await client.get(f"/v1/agents/{agent_id}", headers=_headers(token))
     assert loaded.json()["instructions"] == "You research primary sources first."
 
 

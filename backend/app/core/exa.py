@@ -67,7 +67,7 @@ class ExaClient:
         response.raise_for_status()
         payload: object = response.json()
         self.log.debug(
-            "exa << %s", json.dumps(payload, ensure_ascii=False, default=str)
+            "EXA SEARCH RESPONSE: %s", json.dumps(payload, ensure_ascii=False, default=str)
         )
         if not isinstance(payload, dict):
             raise ValueError("unexpected Exa response")

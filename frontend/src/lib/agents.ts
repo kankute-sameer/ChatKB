@@ -26,28 +26,28 @@ export function notifyAgentsChanged(): void {
 }
 
 export function listAgents(): Promise<Agent[]> {
-  return api<Agent[]>("/v2/agents");
+  return api<Agent[]>("/v1/agents");
 }
 
 export function getAgent(id: string): Promise<Agent> {
-  return api<Agent>(`/v2/agents/${id}`);
+  return api<Agent>(`/v1/agents/${id}`);
 }
 
 export function getAgentInstructions(
   id: string,
 ): Promise<{ instructions: string }> {
-  return api<{ instructions: string }>(`/v2/agents/${id}/instructions`);
+  return api<{ instructions: string }>(`/v1/agents/${id}/instructions`);
 }
 
 export function getAgentCollections(id: string): Promise<Collection[]> {
-  return api<Collection[]>(`/v2/agents/${id}/collections`);
+  return api<Collection[]>(`/v1/agents/${id}/collections`);
 }
 
 export function setAgentCollections(
   id: string,
   collectionIds: string[],
 ): Promise<Collection[]> {
-  return api<Collection[]>(`/v2/agents/${id}/collections`, {
+  return api<Collection[]>(`/v1/agents/${id}/collections`, {
     method: "PUT",
     body: JSON.stringify({ collectionIds }),
   });
@@ -57,7 +57,7 @@ export function createAgent(body: {
   name: string;
   description?: string;
 }): Promise<Agent> {
-  return api<Agent>("/v2/agents", {
+  return api<Agent>("/v1/agents", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -69,12 +69,12 @@ export function updateAgent(
     Pick<Agent, "name" | "description" | "instructions" | "connectors">
   >,
 ): Promise<Agent> {
-  return api<Agent>(`/v2/agents/${id}`, {
+  return api<Agent>(`/v1/agents/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
 }
 
 export function deleteAgent(id: string): Promise<void> {
-  return api<void>(`/v2/agents/${id}`, { method: "DELETE" });
+  return api<void>(`/v1/agents/${id}`, { method: "DELETE" });
 }
