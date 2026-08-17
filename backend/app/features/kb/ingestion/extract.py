@@ -54,6 +54,10 @@ ExtractionResult = ProseExtraction | TableExtraction
 _converter: Any | None = None
 _converter_lock = threading.Lock()
 
+SCANNED_PDF_ERROR = (
+    "This PDF has no extractable text. Scanned PDFs are not supported."
+)
+
 HEADING_LABELS = frozenset({"section_header"})
 TABLE_LABELS = frozenset({"table"})
 SUPPORTED_EXTENSIONS = frozenset(
@@ -165,6 +169,8 @@ def extract_pdf(
         document,
         image_min_dimension_px=max(1, image_min_dimension_px),
     )
+    if not blocks:
+        raise ValueError(SCANNED_PDF_ERROR)
     pages = getattr(document, "pages", None) or {}
     if pages:
         page_count = len(pages)

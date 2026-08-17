@@ -12,6 +12,7 @@ from app.core.ids import new_id
 from app.core.log import get_logger
 from app.features.kb.db import KbRepository
 from app.features.kb.ingestion.extract import (
+    SCANNED_PDF_ERROR,
     Block,
     ProseExtraction,
     TableExtraction,
@@ -20,6 +21,7 @@ from app.features.kb.ingestion.extract import (
     extract_docx,
     extract_json,
     extract_markdown,
+    extract_pdf,
     extract_text,
 )
 from app.features.kb.ingestion.pipeline import _ingest
@@ -70,6 +72,26 @@ def test_docx_via_docling_produces_page_less_blocks(
     ]
     assert all(block["page"] is None for block in blocks)
     assert all(block["bbox"] is None for block in blocks)
+
+
+def test_empty_pdf_extraction_rejects_scanned_pdf(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    document = SimpleNamespace(
+        pages={1: object()},
+        iterate_items=lambda: [],
+    )
+    converter = SimpleNamespace(
+        convert=lambda _path: SimpleNamespace(document=document)
+    )
+    monkeypatch.setattr(
+        "app.features.kb.ingestion.extract.get_converter",
+        lambda: converter,
+    )
+
+    with pytest.raises(ValueError, match=SCANNED_PDF_ERROR):
+        extract_pdf(tmp_path / "scanned.pdf")
 
 
 def test_router_dispatches_pdf_and_docx(

@@ -223,7 +223,7 @@ export function CreateKnowledgeBaseDialog({
             <Button
               type="submit"
               disabled={creating || !name.trim()}
-              className="rounded-full bg-gray-500 text-white hover:bg-gray-600 disabled:opacity-50"
+              className="rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
             >
               {creating ? "Creating…" : "Create"}
             </Button>

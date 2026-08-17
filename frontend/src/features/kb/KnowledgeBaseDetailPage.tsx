@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   CloudUpload,
+  FileWarning,
   Loader2,
   Plus,
   Search,
@@ -49,6 +50,7 @@ import {
 
 const SUPPORTED_FILE_PATTERN = /\.(pdf|docx|txt|md|csv|tsv|json)$/i;
 const ACCEPTED_FILE_TYPES = ".pdf,.docx,.txt,.md,.csv,.tsv,.json";
+const SCANNED_PDF_ERROR = "Scanned PDFs are not supported";
 
 type DetailTab = "files" | "agents";
 
@@ -84,6 +86,7 @@ export function KnowledgeBaseDetailPage() {
   const navigate = useNavigate();
   const collections = useCollectionList();
   const inputRef = useRef<HTMLInputElement>(null);
+  const shownIngestionErrors = useRef(new Set<string>());
   const [collection, setCollection] = useState<Collection | null>(null);
   const [missing, setMissing] = useState(false);
   const [files, setFiles] = useState<KbFile[]>([]);
@@ -94,6 +97,7 @@ export function KnowledgeBaseDetailPage() {
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ingestionFailure, setIngestionFailure] = useState<KbFile | null>(null);
   const [openFile, setOpenFile] = useState<KbFile | null>(null);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
   const [agentQuery, setAgentQuery] = useState("");
@@ -104,6 +108,8 @@ export function KnowledgeBaseDetailPage() {
     setTab("files");
     setQuery("");
     setError(null);
+    setIngestionFailure(null);
+    shownIngestionErrors.current.clear();
   }, [id]);
 
   const loadFiles = useCallback(async (collectionId: string) => {
@@ -143,6 +149,19 @@ export function KnowledgeBaseDetailPage() {
     }, 2000);
     return () => window.clearInterval(timer);
   }, [id, processing, loadFiles]);
+
+  useEffect(() => {
+    if (ingestionFailure) return;
+    const failed = files.find(
+      (file) =>
+        file.status === "failed" &&
+        file.error?.includes(SCANNED_PDF_ERROR) &&
+        !shownIngestionErrors.current.has(file.id),
+    );
+    if (!failed) return;
+    shownIngestionErrors.current.add(failed.id);
+    setIngestionFailure(failed);
+  }, [files, ingestionFailure]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -529,6 +548,43 @@ export function KnowledgeBaseDetailPage() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={ingestionFailure != null}
+        onOpenChange={(open) => {
+          if (!open) setIngestionFailure(null);
+        }}
+      >
+        <DialogContent
+          aria-describedby={undefined}
+          className="w-[min(560px,calc(100vw-4rem))] max-w-none rounded-lg px-8 py-8"
+        >
+          <div className="flex size-11 items-center justify-center rounded-full bg-red-50 text-destructive">
+            <FileWarning className="size-5" aria-hidden />
+          </div>
+          <DialogHeader className="mt-5">
+            <DialogTitle className="text-title font-normal">
+              Scanned PDF not supported
+            </DialogTitle>
+          </DialogHeader>
+          <p className="mt-3 font-sans text-nav font-ui text-ink-muted">
+            <span className="font-medium text-ink">
+              {ingestionFailure?.filename}
+            </span>{" "}
+            does not contain extractable text. Please upload a PDF with
+            selectable text.
+          </p>
+          <div className="mt-7 flex justify-end">
+            <Button
+              type="button"
+              className="rounded-full bg-gray-900 px-6 text-white hover:bg-gray-800"
+              onClick={() => setIngestionFailure(null)}
+            >
+              Got it
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={addAgentOpen} onOpenChange={setAddAgentOpen}>
         <DialogContent className="w-[min(780px,calc(100vw-4rem))] max-w-none rounded-lg px-8 py-10">
