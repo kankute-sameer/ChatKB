@@ -105,8 +105,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The example local users are `alice` and `bob`
-with password `changeme`; replace these credentials before deployment.
+Open `http://localhost:5173`. 
 
 ## Deploy with Docker Compose
 

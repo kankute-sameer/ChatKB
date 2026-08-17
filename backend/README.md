@@ -25,7 +25,7 @@ Generate a JWT secret and password hashes, then edit `.env`:
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 python -c "from passlib.context import CryptContext; print(CryptContext(schemes=['bcrypt']).hash('yourpassword'))"
-python -c "import json; print(json.dumps({'alice': '<hash>', 'bob': '<hash>'}))"
+python -c "import json; print(json.dumps({'test': '<hash>'}))"
 ```
 
 Put the JSON object in `AUTH_USERS` and the secret in `JWT_SECRET`. Set `LLM_API_KEY` for generation.

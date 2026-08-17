@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 const TOUR_SLIDES = [
   {
-    title: "Welcome",
+    title: "Welcome!",
     body: "Build agents, give them tools and knowledge, and chat. Every answer is cited.",
   },
   {
