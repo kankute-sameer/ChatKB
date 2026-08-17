@@ -31,6 +31,12 @@ class KbFileSummary(BaseModel):
     size_bytes: int = Field(serialization_alias="sizeBytes")
     mime_type: str = Field(serialization_alias="mimeType")
     status: FileStatus
+    ingestion_stage: str = Field(serialization_alias="ingestionStage")
+    ingestion_progress: int = Field(
+        ge=0,
+        le=100,
+        serialization_alias="ingestionProgress",
+    )
     error: str | None = None
     page_count: int | None = Field(default=None, serialization_alias="pageCount")
     created_at: datetime = Field(serialization_alias="createdAt")

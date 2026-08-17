@@ -98,6 +98,8 @@ async def test_pipeline_extract_failure_marks_file_failed(
         row = await session.get(KbFile, file_id)
         assert row is not None
         assert row.status == "failed"
+        assert row.ingestion_stage == "Failed"
+        assert row.ingestion_progress == 20
         assert row.error is not None
         assert "docling exploded" in row.error
     assert not pdf_path.exists()
@@ -160,6 +162,8 @@ async def test_pipeline_persists_chunks_and_marks_ready(
         row = await session.get(KbFile, file_id)
         assert row is not None
         assert row.status == "ready"
+        assert row.ingestion_stage == "Complete"
+        assert row.ingestion_progress == 100
         assert row.s3_key == f"alice/{file_id}.pdf"
         assert row.error is None
         assert row.page_count == 1
@@ -192,12 +196,8 @@ async def test_pipeline_persists_chunks_and_marks_ready(
         "Intro\n\nA test image.",
         "Intro\n\nHello world.",
     ]
-    assert storage.puts == [
-        (f"alice/{file_id}.pdf", b"%PDF-1.4", "application/pdf")
-    ]
-    ingestion = [
-        item for item in tracer.observations if item.name == "kb.ingestion"
-    ]
+    assert storage.puts == [(f"alice/{file_id}.pdf", b"%PDF-1.4", "application/pdf")]
+    ingestion = [item for item in tracer.observations if item.name == "kb.ingestion"]
     assert len(ingestion) == 1
     assert ingestion[0].session_id == collection_id
     assert ingestion[0].user_id == "alice"

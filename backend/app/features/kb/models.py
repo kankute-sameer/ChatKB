@@ -88,6 +88,12 @@ class KbFile(Base):
     status: Mapped[str] = mapped_column(
         String, default="processing", server_default="processing", nullable=False
     )
+    ingestion_stage: Mapped[str] = mapped_column(
+        String, default="Queued", server_default="Queued", nullable=False
+    )
+    ingestion_progress: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content_md: Mapped[str | None] = mapped_column(Text, nullable=True)

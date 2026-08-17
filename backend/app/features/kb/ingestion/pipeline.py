@@ -55,6 +55,8 @@ async def run_ingestion(
             log.warning("ingestion skipped; file %s not found", file_id)
             return
         row.status = "processing"
+        row.ingestion_stage = "Preparing file"
+        row.ingestion_progress = 2
         row.error = None
         row.updated_at = datetime.now(UTC)
         await session.commit()
@@ -102,6 +104,7 @@ async def run_ingestion(
                 failed = await repo.get_file(file_id)
                 if failed is not None:
                     failed.status = "failed"
+                    failed.ingestion_stage = "Failed"
                     failed.error = str(exc)
                     failed.updated_at = datetime.now(UTC)
                     await session.commit()
@@ -129,6 +132,7 @@ async def _ingest(
     tracer = get_tracer()
     suffix = Path(row.filename).suffix.lower()
     s3_key = f"{owner_id}/{row.id}{suffix}"
+    await _set_ingestion_progress(session, row, 5, "Uploading original")
     log.info("uploading %s to object storage", row.filename)
     with tracer.span(
         "store",
@@ -138,8 +142,7 @@ async def _ingest(
         await storage.put(s3_key, file_bytes, row.mime_type)
         store_span.update(output={"s3_key": s3_key, "bytes": len(file_bytes)})
     row.s3_key = s3_key
-    row.updated_at = datetime.now(UTC)
-    await session.commit()
+    await _set_ingestion_progress(session, row, 20, "Extracting content")
 
     log.info("extracting %s", row.filename)
     with tracer.span(
@@ -169,6 +172,7 @@ async def _ingest(
         )
     if isinstance(extraction, ProseExtraction):
         blocks = extraction.blocks
+        await _set_ingestion_progress(session, row, 38, "Understanding images")
         with tracer.span(
             "describe_images",
             input={"candidate_count": len(extraction.images)},
@@ -189,6 +193,12 @@ async def _ingest(
                 }
             )
         content_md = assemble_content(blocks)
+        await _set_ingestion_progress(
+            session,
+            row,
+            52,
+            "Linking sections and building structure",
+        )
         with tracer.span("chunk", input={"block_count": len(blocks)}) as chunk_span:
             chunks = chunk_blocks(blocks)
             chunk_span.update(output={"chunk_count": len(chunks)})
@@ -199,6 +209,12 @@ async def _ingest(
             input={"candidate_count": 0},
         ) as image_span:
             image_span.update(output={"candidate_count": 0, "described_count": 0})
+        await _set_ingestion_progress(
+            session,
+            row,
+            52,
+            "Structuring tabular data",
+        )
         with tracer.span("chunk", input={"kind": "table"}) as chunk_span:
             content_md, chunks = await prepare_table(
                 extraction,
@@ -208,15 +224,18 @@ async def _ingest(
             )
             chunk_span.update(output={"chunk_count": len(chunks)})
         page_count = None
+    await _set_ingestion_progress(session, row, 68, "Summarizing document")
     with tracer.span(
         "index_md",
         input={"filename": row.filename, "chunk_count": len(chunks)},
     ) as index_span:
         file_summary = await generate_file_summary(content_md, llm, ingestion_model)
         index_span.update(output={"summary": file_summary})
+    await _set_ingestion_progress(session, row, 82, "Generating search embeddings")
     with tracer.span("embed", input={"chunk_count": len(chunks)}) as embed_span:
         embeddings = await embedder.embed([chunk.text for chunk in chunks])
         embed_span.update(output={"embedding_count": len(embeddings)})
+    await _set_ingestion_progress(session, row, 95, "Finalizing search index")
     now = datetime.now(UTC)
     rows = [
         KbChunk(
@@ -244,6 +263,8 @@ async def _ingest(
     row.summary_md = file_summary
     row.page_count = page_count
     row.status = "ready"
+    row.ingestion_stage = "Complete"
+    row.ingestion_progress = 100
     row.error = None
     row.updated_at = now
     ready_files = await repo.list_ready_files(row.collection_id)
@@ -256,3 +277,15 @@ async def _ingest(
     await session.commit()
     log.info("ready %s (%s chunks)", row.id, len(rows))
     return page_count, len(rows)
+
+
+async def _set_ingestion_progress(
+    session: AsyncSession,
+    row: KbFile,
+    progress: int,
+    stage: str,
+) -> None:
+    row.ingestion_progress = progress
+    row.ingestion_stage = stage
+    row.updated_at = datetime.now(UTC)
+    await session.commit()

@@ -1,11 +1,25 @@
 import json
+from collections.abc import AsyncIterator
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from PIL import Image
 
 from app.core.llm.client import LLMClient, _ResponsesMapper
+
+
+class _FailingAfterFirstEvent(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield (
+            b'data: {"type":"response.output_text.delta",'
+            b'"item_id":"msg_1","delta":"Hello"}\n\n'
+        )
+        raise httpx.ReadError("stream disconnected")
+
+    async def aclose(self) -> None:
+        return None
 
 
 def test_stream_body_includes_reasoning() -> None:
@@ -108,6 +122,119 @@ async def test_describe_image_failure_returns_empty_string() -> None:
         http=http,
     )
     assert await client.describe_image(Image.new("RGB", (100, 80))) == ""
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_complete_retries_rate_limit_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.core.retry.asyncio.sleep", sleep)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, text="rate limited")
+        return httpx.Response(200, json={"output_text": "Recovered"})
+
+    http = httpx.AsyncClient(
+        base_url="https://example.test/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    client = LLMClient(
+        api_key="k",
+        base_url="https://example.test/v1",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
+        http=http,
+    )
+
+    assert await client.complete([]) == "Recovered"
+    assert calls == 2
+    sleep.assert_awaited_once_with(1.0)
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_retries_failure_before_first_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.core.retry.asyncio.sleep", sleep)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, text="temporarily unavailable")
+        return httpx.Response(
+            200,
+            content=(
+                b'data: {"type":"response.output_text.delta",'
+                b'"item_id":"msg_1","delta":"Hello"}\n\n'
+                b'data: {"type":"response.output_text.done","item_id":"msg_1"}\n\n'
+            ),
+        )
+
+    http = httpx.AsyncClient(
+        base_url="https://example.test/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    client = LLMClient(
+        api_key="k",
+        base_url="https://example.test/v1",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
+        http=http,
+    )
+
+    events = [event async for event in client.stream([])]
+
+    assert calls == 2
+    assert [
+        event.get("delta") for event in events if event["type"] == "text-delta"
+    ] == ["Hello"]
+    sleep.assert_awaited_once_with(1.0)
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_does_not_retry_after_first_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.core.retry.asyncio.sleep", sleep)
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, stream=_FailingAfterFirstEvent())
+
+    http = httpx.AsyncClient(
+        base_url="https://example.test/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    client = LLMClient(
+        api_key="k",
+        base_url="https://example.test/v1",
+        model="gpt-5.6-luna",
+        title_model="gpt-5.6-luna",
+        http=http,
+    )
+
+    events = [event async for event in client.stream([])]
+
+    assert calls == 1
+    assert [
+        event.get("delta") for event in events if event["type"] == "text-delta"
+    ] == ["Hello"]
+    assert [event["type"] for event in events].count("error") == 1
+    sleep.assert_not_awaited()
     await http.aclose()
 
 

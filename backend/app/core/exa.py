@@ -5,6 +5,7 @@ import httpx
 
 from app.core.config import Settings, get_settings
 from app.core.log import AppLogger, get_logger
+from app.core.retry import is_transient, retry_async
 
 EXA_SEARCH_URL = "https://api.exa.ai/search"
 
@@ -56,15 +57,20 @@ class ExaClient:
             "query": query,
             "type": "auto",
             "numResults": num_results,
-            "contents":{"highlights":True}
+            "contents": {"highlights": True},
         }
         self.log.curl("POST", EXA_SEARCH_URL, headers, body)
-        response = await client.post(
-            EXA_SEARCH_URL,
-            headers=headers,
-            json=body,
-        )
-        response.raise_for_status()
+
+        async def request() -> httpx.Response:
+            response = await client.post(
+                EXA_SEARCH_URL,
+                headers=headers,
+                json=body,
+            )
+            response.raise_for_status()
+            return response
+
+        response = await retry_async(request, retry_on=is_transient)
         payload: object = response.json()
         self.log.debug(
             "EXA SEARCH RESPONSE: %s",

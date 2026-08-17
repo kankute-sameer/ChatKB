@@ -218,6 +218,8 @@ class KbService:
             size_bytes=len(data),
             mime_type=mime_type,
             status="processing",
+            ingestion_stage="Queued",
+            ingestion_progress=0,
             error=None,
             created_at=now,
             updated_at=now,
@@ -415,9 +417,7 @@ def _validate_upload(filename: str, mime_type: str, data: bytes) -> str:
     if allowed is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Supported file types: PDF, DOCX, TXT, MD, CSV, TSV, and JSON"
-            ),
+            detail=("Supported file types: PDF, DOCX, TXT, MD, CSV, TSV, and JSON"),
         )
     if mime_type not in allowed and mime_type != "application/octet-stream":
         raise HTTPException(

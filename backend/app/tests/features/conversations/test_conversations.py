@@ -253,15 +253,20 @@ async def test_turn_trace_groups_generation_by_conversation_and_user(
         )
         assert response.status_code == 200
         detail = await _wait_until_idle(client, token, conversation_id)
+        messages = detail["messages"]
+        assert isinstance(messages, list)
         assistant_id = next(
             str(message["id"])
-            for message in detail["messages"]
-            if message["role"] == "assistant"
+            for message in messages
+            if isinstance(message, dict) and message["role"] == "assistant"
         )
         feedback = await client.put(
             f"/v1/conversations/{conversation_id}/messages/{assistant_id}/feedback",
             headers=_headers(token),
-            json={"rating": "down", "comment": "The answer missed an important detail."},
+            json={
+                "rating": "down",
+                "comment": "The answer missed an important detail.",
+            },
         )
         assert feedback.status_code == 200
         assert feedback.json() == {"rating": "down"}

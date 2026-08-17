@@ -7,7 +7,7 @@ from app.core import db
 async def test_plain_postgresql_url_uses_asyncpg_and_registers_pgvector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    registered = []
+    registered: list[object] = []
     monkeypatch.setattr(db, "_register_pgvector", registered.append)
 
     engine = db.create_engine("postgresql://user:pass@localhost:5432/chatkb")

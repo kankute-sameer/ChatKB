@@ -199,6 +199,8 @@ async def test_upload_returns_processing_immediately(
     assert upload.status_code == 202
     body = upload.json()
     assert body["status"] == "processing"
+    assert body["ingestionStage"] == "Queued"
+    assert body["ingestionProgress"] == 0
     assert body["filename"] == "handbook.pdf"
     assert str(body["id"]).startswith("file_")
     assert body["contentMd"] is None
@@ -211,6 +213,8 @@ async def test_upload_returns_processing_immediately(
     rows = listed.json()
     assert len(rows) == 1
     assert rows[0]["status"] == "processing"
+    assert rows[0]["ingestionStage"] == "Queued"
+    assert rows[0]["ingestionProgress"] == 0
     assert rows[0]["filename"] == "handbook.pdf"
 
 
@@ -316,8 +320,7 @@ async def test_non_pdf_file_view_returns_whole_content_and_authorizes(
         TEST_USERNAME,
         filename="guide.docx",
         mime_type=(
-            "application/vnd.openxmlformats-officedocument."
-            "wordprocessingml.document"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         ),
         content_md="# Guide\n\nThe full extracted document.",
     )
@@ -517,4 +520,3 @@ async def test_collection_agents_attach_list_and_detach(
         headers=_headers(token),
     )
     assert listed_again.json() == []
-

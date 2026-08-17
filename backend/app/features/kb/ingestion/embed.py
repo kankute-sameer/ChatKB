@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from typing import Any, Protocol
 
 from app.core.config import Settings, get_settings
+from app.core.retry import is_rate_limit, retry_async
 from app.features.kb.models import EMBEDDING_DIMENSIONS
 
 EMBEDDING_MODEL = "gemini-embedding-001"
@@ -87,39 +87,28 @@ class GeminiEmbedder:
             task_type=task_type,
             output_dimensionality=self._dimensions,
         )
-        delay = 1.0
-        last_error: Exception | None = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                result = await client.aio.models.embed_content(
-                    model=self._model,
-                    contents=texts,
-                    config=config,
+
+        async def embed_batch() -> list[list[float]]:
+            result = await client.aio.models.embed_content(
+                model=self._model,
+                contents=texts,
+                config=config,
+            )
+            embeddings = getattr(result, "embeddings", None) or []
+            vectors: list[list[float]] = []
+            for item in embeddings:
+                values = getattr(item, "values", None) or []
+                vectors.append([float(x) for x in values])
+            if len(vectors) != len(texts):
+                raise RuntimeError(
+                    f"Gemini returned {len(vectors)} embeddings for {len(texts)} texts"
                 )
-                embeddings = getattr(result, "embeddings", None) or []
-                vectors: list[list[float]] = []
-                for item in embeddings:
-                    values = getattr(item, "values", None) or []
-                    vectors.append([float(x) for x in values])
-                if len(vectors) != len(texts):
-                    raise RuntimeError(
-                        "Gemini returned "
-                        f"{len(vectors)} embeddings for {len(texts)} texts"
-                    )
-                return vectors
-            except Exception as exc:
-                last_error = exc
-                if attempt < MAX_RETRIES - 1 and _is_rate_limit(exc):
-                    await asyncio.sleep(delay)
-                    delay = min(delay * 2, 16)
-                    continue
-                raise
-        raise RuntimeError("Gemini embedding failed") from last_error
+            return vectors
 
-
-def _is_rate_limit(exc: Exception) -> bool:
-    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    if status == 429:
-        return True
-    text = str(exc).lower()
-    return "429" in text or "resource_exhausted" in text or "rate limit" in text
+        return await retry_async(
+            embed_batch,
+            max_attempts=MAX_RETRIES,
+            base_delay=1.0,
+            max_delay=16.0,
+            retry_on=is_rate_limit,
+        )

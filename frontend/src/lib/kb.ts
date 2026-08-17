@@ -21,6 +21,8 @@ export interface KbFile {
   sizeBytes: number;
   mimeType: string;
   status: FileStatus;
+  ingestionStage: string;
+  ingestionProgress: number;
   error: string | null;
   pageCount: number | null;
   contentMd?: string | null;

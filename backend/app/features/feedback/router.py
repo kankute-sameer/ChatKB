@@ -1,10 +1,11 @@
 from typing import Annotated
 
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field, field_validator
+
 from app.core.deps import get_current_user
 from app.core.ids import new_id
 from app.core.tracing import get_tracer
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(tags=["feedback"])
 

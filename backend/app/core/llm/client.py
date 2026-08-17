@@ -10,6 +10,7 @@ from PIL import Image
 from app.core.config import Settings, get_settings
 from app.core.llm.types import ChatMessage, StreamEvent
 from app.core.log import AppLogger, get_logger
+from app.core.retry import is_transient, retry_async
 
 IMAGE_DESCRIPTION_PROMPT = (
     "Describe this image concisely for search and retrieval. If it contains text, "
@@ -82,6 +83,23 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
+    async def _post_response(
+        self,
+        client: httpx.AsyncClient,
+        body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        async def request() -> httpx.Response:
+            response = await client.post(
+                "/responses",
+                json=body,
+                headers=headers,
+            )
+            response.raise_for_status()
+            return response
+
+        return await retry_async(request, retry_on=is_transient)
+
     @property
     def model_name(self) -> str:
         return self._model
@@ -117,17 +135,10 @@ class LLMClient:
         model: str | None = None,
     ) -> str:
         client = await self._client()
-        body = self._body(
-            messages, model=model or self._title_model, stream=False
-        )
+        body = self._body(messages, model=model or self._title_model, stream=False)
         headers = self._headers()
         self.log.curl("POST", f"{self._base_url}/responses", headers, body)
-        response = await client.post(
-            "/responses",
-            json=body,
-            headers=headers,
-        )
-        response.raise_for_status()
+        response = await self._post_response(client, body, headers)
         payload = response.json()
         self.log.debug("RAW OPENAI CHUNK << %s", payload)
         return _output_text(payload)
@@ -164,12 +175,7 @@ class LLMClient:
                 self._vision_model,
                 len(buffer.getvalue()),
             )
-            response = await client.post(
-                "/responses",
-                json=body,
-                headers=headers,
-            )
-            response.raise_for_status()
+            response = await self._post_response(client, body, headers)
             payload = response.json()
             return _output_text(payload)
         except Exception as exc:
@@ -195,18 +201,61 @@ class LLMClient:
         )
         headers = self._headers()
         self.log.curl("POST", f"{self._base_url}/responses", headers, body)
-        async with client.stream(
-            "POST",
-            "/responses",
-            json=body,
-            headers=headers,
-        ) as response:
-            response.raise_for_status()
-            async for payload in _iter_sse_payloads(response, log=self.log):
+
+        async def open_stream() -> tuple[
+            httpx.Response,
+            AsyncIterator[dict[str, Any]],
+            dict[str, Any] | None,
+        ]:
+            request = client.build_request(
+                "POST",
+                "/responses",
+                json=body,
+                headers=headers,
+            )
+            response = await client.send(request, stream=True)
+            try:
+                response.raise_for_status()
+                payloads = _iter_sse_payloads(response, log=self.log)
+                first_payload = await anext(payloads, None)
+                return response, payloads, first_payload
+            except Exception:
+                await response.aclose()
+                raise
+
+        try:
+            response, payloads, first_payload = await retry_async(
+                open_stream,
+                retry_on=is_transient,
+            )
+        except Exception as exc:
+            self.log.warning("LLM stream failed before output began: %s", exc)
+            yield StreamEvent(
+                type="error",
+                errorText="The model failed to complete.",
+            )
+            return
+
+        try:
+            if first_payload is not None:
+                for event in mapper.handle(first_payload):
+                    if event.get("type") == "error":
+                        failed = True
+                    yield event
+            async for payload in payloads:
                 for event in mapper.handle(payload):
                     if event.get("type") == "error":
                         failed = True
                     yield event
+        except Exception as exc:
+            failed = True
+            self.log.warning("LLM stream failed after output began: %s", exc)
+            yield StreamEvent(
+                type="error",
+                errorText="The model failed to complete.",
+            )
+        finally:
+            await response.aclose()
         if not failed:
             for event in mapper.close():
                 yield event
@@ -355,9 +404,7 @@ class _ResponsesMapper:
             self._open_reasoning[reasoning_id] = ""
             events.append(StreamEvent(type="reasoning-start", id=reasoning_id))
         self._open_reasoning[reasoning_id] += delta
-        events.append(
-            StreamEvent(type="reasoning-delta", id=reasoning_id, delta=delta)
-        )
+        events.append(StreamEvent(type="reasoning-delta", id=reasoning_id, delta=delta))
         return events
 
     def _on_reasoning_done(self, payload: dict[str, Any]) -> list[StreamEvent]:

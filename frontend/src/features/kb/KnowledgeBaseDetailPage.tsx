@@ -270,7 +270,14 @@ export function KnowledgeBaseDetailPage() {
       render: (row) => (
         <div className="flex min-w-0 items-center gap-3">
           <FileTypeIcon filename={row.filename} className="size-8" />
-          <span className="truncate font-normal text-foreground">{row.filename}</span>
+          <div className="min-w-0">
+            <div className="truncate font-normal text-foreground">{row.filename}</div>
+            {row.status === "processing" ? (
+              <div className="truncate font-sans text-nav font-ui text-ink-muted">
+                {row.ingestionStage} · {row.ingestionProgress}%
+              </div>
+            ) : null}
+          </div>
         </div>
       ),
     },
