@@ -53,10 +53,9 @@ ExtractionResult = ProseExtraction | TableExtraction
 
 _converter: Any | None = None
 _converter_lock = threading.Lock()
+WARMUP_PDF = Path(__file__).with_name("warmup.pdf")
 
-SCANNED_PDF_ERROR = (
-    "This PDF has no extractable text. Scanned PDFs are not supported."
-)
+SCANNED_PDF_ERROR = "This PDF has no extractable text. Scanned PDFs are not supported."
 
 HEADING_LABELS = frozenset({"section_header"})
 TABLE_LABELS = frozenset({"table"})
@@ -85,6 +84,11 @@ def reset_converter() -> None:
         _converter = None
 
 
+def warm_converter() -> None:
+    """Load layout + TableFormer weights by converting the bundled sample PDF."""
+    get_converter().convert(str(WARMUP_PDF))
+
+
 def _build_converter() -> Any:
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -99,7 +103,7 @@ def _build_converter() -> Any:
         allowed_formats=[InputFormat.PDF, InputFormat.DOCX],
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=options),
-        }
+        },
     )
 
 
@@ -235,10 +239,7 @@ def extract_delimited(path: str | Path, *, delimiter: str) -> TableExtraction:
     rows: list[dict[str, str]] = []
     for raw_row in reader:
         rows.append(
-            {
-                column: str(raw_row.get(column) or "").strip()
-                for column in columns
-            }
+            {column: str(raw_row.get(column) or "").strip() for column in columns}
         )
         if len(rows) >= TABLE_SAMPLE_ROWS:
             break
@@ -281,14 +282,9 @@ def _json_table(value: object) -> TableExtraction | None:
     if not all(isinstance(row, dict) for row in value):
         return None
     object_rows = [row for row in value if isinstance(row, dict)]
-    if not all(
-        all(_is_scalar(cell) for cell in row.values())
-        for row in object_rows
-    ):
+    if not all(all(_is_scalar(cell) for cell in row.values()) for row in object_rows):
         return None
-    columns = list(
-        dict.fromkeys(str(key) for row in object_rows for key in row)
-    )
+    columns = list(dict.fromkeys(str(key) for row in object_rows for key in row))
     if not columns:
         return None
     shared = set(object_rows[0])
@@ -299,10 +295,7 @@ def _json_table(value: object) -> TableExtraction | None:
     if union and len(shared) / len(union) < 0.6:
         return None
     rows = [
-        {
-            column: _scalar_text(row.get(column))
-            for column in columns
-        }
+        {column: _scalar_text(row.get(column)) for column in columns}
         for row in object_rows[:TABLE_SAMPLE_ROWS]
     ]
     return TableExtraction("table", columns, rows, infer_column_types(columns, rows))

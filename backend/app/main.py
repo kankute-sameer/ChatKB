@@ -1,6 +1,8 @@
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +12,7 @@ from app.core.db import create_engine, create_session_factory
 from app.core.deps import get_current_user
 from app.core.exa import ExaClient
 from app.core.llm.client import LLMClient
-from app.core.log import configure_logging
+from app.core.log import AppLogger, configure_logging
 from app.core.storage import S3Storage
 from app.core.tools import ToolRegistry
 from app.core.tracing import NullTracer, create_tracer, set_tracer
@@ -24,6 +26,7 @@ from app.features.conversations.tools import WebSearchTool
 from app.features.feedback.router import router as feedback_router
 from app.features.kb import models as kb_models  # noqa: F401
 from app.features.kb.ingestion.embed import GeminiEmbedder
+from app.features.kb.ingestion.extract import warm_converter
 from app.features.kb.router import router as kb_router
 from app.features.kb.tools import KbSearchTool, QueryTableTool
 
@@ -59,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage = storage
     app.state.tools = tools
     app.state.log = log
+    await _warm_docling(log)
     cleanup = asyncio.create_task(store.cleanup_loop())
     try:
         yield
@@ -70,6 +74,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await tracer.shutdown()
         set_tracer(NullTracer())
         await engine.dispose()
+
+
+async def _warm_docling(log: AppLogger) -> None:
+    artifacts = os.environ.get("DOCLING_ARTIFACTS_PATH", "").strip()
+    if not artifacts or not Path(artifacts).is_dir():
+        return
+    log.info("warming Docling converter")
+    try:
+        await asyncio.to_thread(warm_converter)
+    except Exception:
+        log.exception("Docling converter warmup failed")
+        return
+    log.info("Docling converter ready")
 
 
 def create_app() -> FastAPI:

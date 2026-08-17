@@ -4,6 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    HF_HOME=/opt/models/hf \
+    DOCLING_ARTIFACTS_PATH=/opt/models/docling \
     PATH="/app/.venv/bin:$PATH"
 
 RUN apt-get update \
@@ -19,6 +21,18 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
+
+COPY scripts/prefetch_docling_models.py /tmp/prefetch_docling_models.py
+# Bakes only the configured layout + accurate TableFormer weights (~370 MiB).
+# OCR, picture-classifier, code/formula, fast TableFormer, and ONNX weights are omitted.
+RUN mkdir -p "$HF_HOME" "$DOCLING_ARTIFACTS_PATH" \
+    && python /tmp/prefetch_docling_models.py \
+    && rm -rf \
+        "$HF_HOME"/* \
+        "$DOCLING_ARTIFACTS_PATH/docling-project--docling-layout-heron/.cache" \
+        "$DOCLING_ARTIFACTS_PATH/docling-project--docling-models/.cache" \
+        /tmp/prefetch_docling_models.py \
+    && chmod -R a+rX /opt/models
 
 COPY alembic.ini ./
 COPY alembic ./alembic

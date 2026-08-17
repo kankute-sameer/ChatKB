@@ -1,12 +1,19 @@
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
 from PIL import Image
 
+from app.core.log import get_logger
 from app.features.kb.ingestion.extract import (
+    WARMUP_PDF,
     blocks_and_images_from_document,
     blocks_from_document,
     normalize_bbox,
+    warm_converter,
 )
+from app.main import _warm_docling
 
 
 def test_normalize_bbox_bottomleft_pdf_points_to_unit_topleft() -> None:
@@ -136,3 +143,52 @@ def test_picture_filter_preserves_reading_order_and_location() -> None:
     assert images[0].anchor == "p1-2"
     assert len(small_calls) == 1
     assert len(large_calls) == 1
+
+
+def test_warmup_pdf_is_bundled() -> None:
+    assert WARMUP_PDF.is_file()
+    assert WARMUP_PDF.read_bytes().startswith(b"%PDF")
+
+
+def test_warm_converter_converts_bundled_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class _Converter:
+        def convert(self, path: str) -> None:
+            calls.append(path)
+
+    monkeypatch.setattr(
+        "app.features.kb.ingestion.extract.get_converter",
+        lambda: _Converter(),
+    )
+    warm_converter()
+    assert calls == [str(WARMUP_PDF)]
+
+
+@pytest.mark.asyncio
+async def test_startup_warms_converter_when_artifacts_exist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifacts = tmp_path / "docling"
+    artifacts.mkdir()
+    monkeypatch.setenv("DOCLING_ARTIFACTS_PATH", str(artifacts))
+    warmup = AsyncMock()
+    monkeypatch.setattr("app.main.asyncio.to_thread", warmup)
+    await _warm_docling(get_logger("chatkb.test"))
+    warmup.assert_awaited_once()
+    assert warmup.await_args is not None
+    assert warmup.await_args.args[0] is warm_converter
+
+
+@pytest.mark.asyncio
+async def test_startup_skips_warmup_without_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DOCLING_ARTIFACTS_PATH", raising=False)
+    warmup = AsyncMock()
+    monkeypatch.setattr("app.main.asyncio.to_thread", warmup)
+    await _warm_docling(get_logger("chatkb.test"))
+    warmup.assert_not_awaited()
